@@ -530,7 +530,7 @@
     "ios/ChessMeTests/ReviewPresentationTests.swift": "291b846789622a95d93ce8bb11234494f329f56f6b30bb404fd9a8b7e7057f06",
     "ios/ChessMeTests/ServiceTests.swift": "1dcd9317ed74abdcb1058c426c14b987cf52fc12021fcf50b5e2e986371340fb",
     "ios/ChessMeTests/SyncTests.swift": "003c43e1fac3cb2424a31096197ebd001ab96d3a39ba922233fe46cdf1fc3c4d",
-    "ios/ChessMeUITests/ChessMeUITests.swift": "b3af4190fc6faa19ec8d91a475513bbfa854a77468b86e4f5c4b6deb113f8eca",
+    "ios/ChessMeUITests/ChessMeUITests.swift": "284fb55e2003db33fa7c6443d7e33c8057b0615a6c09efad4fa872bcb1f0c6a2",
     "ios/ChessMeUITests/Fixtures/lichess-clock-game.json": "64fe34d8828ab9974f46f84c2d6fe1526eb6973a9048413b732fdc1b34dc293b",
     "ios/Configuration/ChessMe.storekit": "6a91498d1e00f2ec890e1633baa5e259ffaee279abf0bfa0a334b43c15130395",
     "ios/Configuration/ExportOptions-TestFlight.plist": "f6f4206d25442be12c83f233d03135945445a44a0e8570a7f9e49e0d6bdfe427",
