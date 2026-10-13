@@ -8,15 +8,18 @@ final class DeviceAnalysisCoordinator {
     static let overnightIdentifier = "com.chessme.app.analysis.overnight"
     private weak var model: AppModel?
     private var worker: Task<Void, Never>?
-    private var backgroundTask: BGTask?
+    private var backgroundTask: (any AnalysisBackgroundTask)?
     private var graceTask: UIBackgroundTaskIdentifier = .invalid
     private var observers: [NSObjectProtocol] = []
     private var isActive = true
     private var activeJobID: String?
     private var withinDecisionProgress = 0.0
+    private var activeJobTotalDecisions = 40
+    private var interruptionReason: String?
     private var continuedIdentifier: String?
     private var continuedRequestPending = false
     private var systemJobIDs = Set<String>()
+    private var completedContinuedRequests: [String] = []
     private var memoryPressureUntil: Date?
     private var memoryRecovery: Task<Void, Never>?
     private let schedulerEnabled: Bool
@@ -28,7 +31,7 @@ final class DeviceAnalysisCoordinator {
         isActive = UIApplication.shared.applicationState != .background
         if schedulerEnabled {
             BGTaskScheduler.shared.register(forTaskWithIdentifier: Self.overnightIdentifier, using: nil) { [weak self] task in
-                Task { @MainActor in await self?.accept(task) }
+                Task { @MainActor in await self?.accept(SystemAnalysisBackgroundTask(task)) }
             }
             UIDevice.current.isBatteryMonitoringEnabled = true
             for name in [UIDevice.batteryStateDidChangeNotification, ProcessInfo.thermalStateDidChangeNotification,
@@ -110,7 +113,9 @@ final class DeviceAnalysisCoordinator {
         }
         guard model.persist() else { return false }
         if !nightOnly, continuedIdentifier != nil {
-            systemJobIDs.formUnion((model.library.localAnalysisJobs ?? []).filter { $0.isPending && !$0.nightOnly }.map(\.id))
+            systemJobIDs.formUnion((model.library.localAnalysisJobs ?? []).filter {
+                $0.isPending && !$0.nightOnly && waitingReason(for: $0) == nil
+            }.map(\.id))
         }
         scheduleOvernight()
         if !nightOnly {
@@ -193,11 +198,10 @@ final class DeviceAnalysisCoordinator {
         let eligibleManualJobs = (model?.library.localAnalysisJobs ?? []).filter { $0.isPending && !$0.nightOnly && waitingReason(for: $0) == nil }
         if schedulerEnabled, isActive, backgroundTask == nil, !continuedRequestPending, !eligibleManualJobs.isEmpty, #available(iOS 26.0, *) {
             let identifier = "com.chessme.app.analysis.continued." + UUID().uuidString
-            continuedIdentifier = identifier
-            systemJobIDs = Set(eligibleManualJobs.map(\.id))
+            prepareContinuedRequest(identifier: identifier, jobIDs: Set(eligibleManualJobs.map(\.id)))
             // Continued processing handlers may be registered after application launch.
             let registered = BGTaskScheduler.shared.register(forTaskWithIdentifier: identifier, using: nil) { [weak self] task in
-                Task { @MainActor in await self?.accept(task) }
+                Task { @MainActor in await self?.accept(SystemAnalysisBackgroundTask(task)) }
             }
             if registered {
                 continuedRequestPending = true
@@ -215,17 +219,37 @@ final class DeviceAnalysisCoordinator {
         start()
     }
 
-    private func accept(_ task: BGTask) async {
-        if #available(iOS 26.0, *), task is BGContinuedProcessingTask { continuedRequestPending = false }
-        guard backgroundTask == nil else { task.setTaskCompleted(success: false); return }
+    func prepareContinuedRequest(identifier: String, jobIDs: Set<String>) {
+        continuedIdentifier = identifier
+        systemJobIDs = jobIDs
+    }
+
+    func accept(_ task: any AnalysisBackgroundTask) async {
+        if task.isContinued {
+            // A grant may arrive after foreground work completed and a newer
+            // batch started. Never attach an old grant to that newer worker.
+            guard task.identifier == continuedIdentifier else {
+                let finished = completedContinuedRequests.contains(task.identifier)
+                if finished { task.progress.totalUnitCount = 1; task.progress.completedUnitCount = 1 }
+                task.complete(success: finished)
+                return
+            }
+            continuedRequestPending = false
+        }
+        guard backgroundTask == nil else { task.complete(success: false); return }
         backgroundTask = task
         // A granted processing task replaces the short UIKit grace period.
         // Its old expiration must not cancel the longer-running review.
         if graceTask != .invalid { UIApplication.shared.endBackgroundTask(graceTask); graceTask = .invalid }
-        task.expirationHandler = { [weak self] in
-            Task { @MainActor in self?.interrupt("Waiting for iOS to resume. Completed decisions are saved.") }
+        let identifier = task.identifier
+        task.onExpiration { [weak self] in
+            Task { @MainActor in
+                guard let self, self.backgroundTask?.identifier == identifier else { return }
+                self.interrupt("Waiting for iOS to resume. Completed decisions are saved.")
+            }
         }
         await model?.subscriptions.refreshEntitlements()
+        guard backgroundTask?.identifier == identifier else { return }
         updateSystemProgress()
         start()
         if worker == nil {
@@ -249,7 +273,7 @@ final class DeviceAnalysisCoordinator {
             guard job.scheduledByUser == true || model.overnightSettings.enabled else { return "Overnight analysis is off." }
             guard OvernightAnalysisSettings.isNight(Date()) else { return "Waiting for tonight, after 10 pm." }
             guard [.charging, .full].contains(UIDevice.current.batteryState) else { return "Waiting for charging." }
-            if #available(iOS 26.0, *), backgroundTask is BGContinuedProcessingTask {
+            if backgroundTask?.isContinued == true {
                 return "Waiting for the overnight processing window."
             }
         }
@@ -313,13 +337,14 @@ final class DeviceAnalysisCoordinator {
 
     private func process() async {
         guard let model else { return }
+        interruptionReason = nil
         model.deviceAnalysisState(running: true, progress: 0, message: "Starting on-device analysis")
         var successful = true
         defer {
             worker = nil; activeJobID = nil
             model.deviceAnalysisState(running: false, progress: model.progress, message: model.progressMessage)
             model.schedulePuzzleMatches()
-            if #available(iOS 26.0, *), backgroundTask is BGContinuedProcessingTask {
+            if backgroundTask?.isContinued == true {
                 successful = successful && !systemJobIDs.isEmpty && (model.library.localAnalysisJobs ?? [])
                     .filter { systemJobIDs.contains($0.id) }.allSatisfy { $0.state == .completed }
             }
@@ -344,6 +369,7 @@ final class DeviceAnalysisCoordinator {
                 _ = model.persist(); successful = false; continue
             }
             activeJobID = job.id; withinDecisionProgress = 0
+            activeJobTotalDecisions = (try? GameReplay(game: game).positions.dropLast().filter { $0.sideToMove == game.playerSide }.count) ?? 40
             model.deviceAnalysisDepth = 0
             mutate(job.id) { $0.state = .running; $0.message = "Analyzing with \(job.configuration.engine.title)" }
             guard model.persist() else {
@@ -364,7 +390,8 @@ final class DeviceAnalysisCoordinator {
                                 guard let self, self.activeJobID == job.id else { return }
                                 let depthProgress = Double(snapshot.completedDepth) / Double(workOptions.maximumDepth) * 0.45
                                 let workProgress = Double(snapshot.nodes) / Double(max(1, workOptions.searchNodeLimit ?? 3_000_000)) * 0.45
-                                self.withinDecisionProgress = max(self.withinDecisionProgress, min(0.9, depthProgress + workProgress))
+                                let timeProgress = (snapshot.elapsedSeconds ?? 0) / max(0.01, workOptions.timeLimitSeconds ?? 3) * 0.9
+                                self.withinDecisionProgress = max(self.withinDecisionProgress, min(0.9, max(depthProgress + workProgress, timeProgress)))
                                 self.model?.deviceAnalysisDepth = snapshot.completedDepth
                                 self.updateSystemProgress()
                             }
@@ -409,7 +436,8 @@ final class DeviceAnalysisCoordinator {
             } catch {
                 successful = false
                 if Task.isCancelled {
-                    mutate(job.id) { if $0.state == .running { $0.state = .queued }; if $0.state != .paused { $0.message = "Waiting to resume. Completed decisions are saved." } }
+                    let reason = interruptionReason ?? "Waiting to resume. Completed decisions are saved."
+                    mutate(job.id) { if $0.state == .running { $0.state = .queued }; if $0.state != .paused { $0.message = reason } }
                     _ = model.persist(); break
                 }
                 mutate(job.id) { $0.state = .failed; $0.message = error.localizedDescription }
@@ -427,6 +455,7 @@ final class DeviceAnalysisCoordinator {
     }
 
     private func interrupt(_ reason: String) {
+        interruptionReason = reason
         if let activeJobID { mutate(activeJobID) { $0.message = reason } }
         _ = model?.persist()
         worker?.cancel()
@@ -434,11 +463,16 @@ final class DeviceAnalysisCoordinator {
     }
 
     private func updateSystemProgress() {
-        guard #available(iOS 26.0, *), let task = backgroundTask as? BGContinuedProcessingTask, let model else { return }
+        guard let model else { return }
+        if let activeJobID, let job = model.library.localAnalysisJobs?.first(where: { $0.id == activeJobID }) {
+            let fraction = min(1, job.progress + withinDecisionProgress / Double(max(1, job.checkpoint?.totalPlies ?? activeJobTotalDecisions)))
+            model.deviceAnalysisState(running: true, progress: fraction, message: model.progressMessage)
+        }
+        guard let task = backgroundTask, task.isContinued else { return }
         let jobs = (model.library.localAnalysisJobs ?? []).filter { systemJobIDs.contains($0.id) }
         task.progress.totalUnitCount = Int64(max(1, jobs.count) * 1_000)
         let done = jobs.reduce(0.0) { total, job in
-            let additional = job.id == activeJobID ? withinDecisionProgress / Double(max(1, job.checkpoint?.totalPlies ?? 40)) : 0
+            let additional = job.id == activeJobID ? withinDecisionProgress / Double(max(1, job.checkpoint?.totalPlies ?? activeJobTotalDecisions)) : 0
             return total + min(1, job.progress + additional)
         }
         task.progress.completedUnitCount = max(task.progress.completedUnitCount, Int64(done * 1_000))
@@ -446,7 +480,16 @@ final class DeviceAnalysisCoordinator {
     }
 
     private func finishBackground(success: Bool) {
-        backgroundTask?.setTaskCompleted(success: success)
+        if success, let identifier = continuedIdentifier, !systemJobIDs.isEmpty,
+           (model?.library.localAnalysisJobs ?? []).filter({ systemJobIDs.contains($0.id) }).allSatisfy({ $0.state == .completed }) {
+            completedContinuedRequests.append(identifier)
+            completedContinuedRequests = Array(completedContinuedRequests.suffix(12))
+        }
+        if success, let task = backgroundTask, task.isContinued {
+            task.progress.totalUnitCount = max(1, task.progress.totalUnitCount)
+            task.progress.completedUnitCount = task.progress.totalUnitCount
+        }
+        backgroundTask?.complete(success: success)
         backgroundTask = nil
         if continuedRequestPending, let continuedIdentifier { BGTaskScheduler.shared.cancel(taskRequestWithIdentifier: continuedIdentifier) }
         continuedRequestPending = false

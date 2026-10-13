@@ -136,14 +136,22 @@ private struct PuzzleExerciseView: View {
     @State private var suggestedMove: ChessMove?
     @State private var choiceEvaluation: PositionEvaluation?
     @State private var attemptTask: Task<Void, Never>?
+    @State private var exploration: MoveHistory?
+    @State private var engineReplies = false
+    @State private var engineReplyTask: Task<Void, Never>?
+    @State private var showAnalysisSettings = false
+    private var displayedHistory: MoveHistory? { exploration ?? playthrough?.history }
     private var shownPosition: ChessPosition? {
         guard let playthrough else { return nil }
+        if playthrough.isComplete, let history = displayedHistory {
+            return history.positions[min(browsingPly ?? history.moves.count, history.moves.count)]
+        }
         if let browsingPly, playthrough.history.positions.indices.contains(browsingPly) { return playthrough.history.positions[browsingPly] }
         if comparingMoves, let choicePosition { return choicePosition }
         return motion.position ?? playthrough.position
     }
     private var targets: Set<Int> {
-        guard browsingPly == nil, !motion.isAnimating, !comparingMoves, !replying, let board = shownPosition, let selected else { return [] }
+        guard (browsingPly == nil || playthrough?.isComplete == true), !motion.isAnimating, !comparingMoves, !replying, let board = shownPosition, let selected else { return [] }
         return Set(board.legalMoves().filter { $0.from == selected }.map(\.to))
     }
     private var choices: [PracticeMoveSuggestion] {
@@ -159,7 +167,7 @@ private struct PuzzleExerciseView: View {
               comparingMoves || shownPosition == choicePosition || playthrough?.isComplete == true else { return [] }
         return choices
     }
-    var body: some View {
+    private var content: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
                 HStack {
@@ -170,13 +178,7 @@ private struct PuzzleExerciseView: View {
                 }
                 if let playthrough, let board = shownPosition {
                     Text("\(board.sideToMove.title) to move").font(.caption).foregroundStyle(ChessMeStyle.muted)
-                    AnalysisBoardView(position: board, perspective: playthrough.positions[0].sideToMove, selectedSquare: selected,
-                                      targets: targets, highlightedSquares: highlightedSquares,
-                                      suggestions: boardChoices, rejectionCount: motion.rejectionCount,
-                                      successCount: motion.successCount, successSquare: motion.successSquare,
-                                      evaluation: choiceEvaluation, evaluationPosition: choicePosition,
-                                      showArrows: false, revealEvaluation: playthrough.isComplete,
-                                      onSquare: browsingPly == nil && !motion.isAnimating && !comparingMoves && !replying && !playthrough.isComplete ? choose : nil)
+                    puzzleBoard(board, playthrough: playthrough)
                     VStack(alignment: .leading, spacing: 5) {
                         if playthrough.isComplete {
                             Text(revealed ? "See the solution" : "Line complete").font(ChessMeStyle.title(22))
@@ -197,20 +199,20 @@ private struct PuzzleExerciseView: View {
                             Button("Show solution") { reveal() }.accessibilityIdentifier("puzzle.reveal")
                         }.font(.subheadline.weight(.semibold)).disabled(browsingPly != nil || motion.isAnimating || replying)
                     }
-                    if playthrough.isComplete, choicePosition != nil {
-                        Text("Evaluation of the last puzzle decision").font(.caption2).foregroundStyle(ChessMeStyle.muted)
-                    }
-                    if !choices.isEmpty {
-                        MoveChoiceLegend(suggestions: choices, comparing: $comparingMoves)
+                    if !playthrough.isComplete && !choices.isEmpty {
+                        MoveChoiceLegend(suggestions: choices, comparing: $comparingMoves, allowsComparison: false)
                             .disabled(motion.isAnimating || replying || browsingPly != nil)
                     }
-                    MoveHistoryView(history: playthrough.history, selectedIndex: browsingPly ?? playthrough.history.moves.count, prefix: "puzzle", title: nil) { index in
+                    let history = displayedHistory ?? playthrough.history
+                    MoveHistoryView(history: history, selectedIndex: browsingPly ?? history.moves.count, prefix: "puzzle", title: nil) { index in
                         guard !motion.isAnimating, !replying else { return }
                         selected = nil
                         comparingMoves = false
-                        browsingPly = index == playthrough.history.moves.count ? nil : index
+                        browsingPly = index == history.moves.count ? nil : index
                     }
-                    if browsingPly != nil {
+                    if playthrough.isComplete {
+                        explorationControls(board, playthrough: playthrough)
+                    } else if browsingPly != nil {
                         Button("Return to puzzle") { browsingPly = nil }.accessibilityIdentifier("puzzle.return")
                     }
                     if !playthrough.isComplete {
@@ -246,6 +248,9 @@ private struct PuzzleExerciseView: View {
                     }.padding(.horizontal, 22).padding(.vertical, 10).background(ChessMeStyle.paper)
                 }
             }
+    }
+    private var trackedContent: some View {
+        content
             .task {
                 if playthrough == nil {
                     do { playthrough = try PuzzlePlaythrough(puzzle: puzzle) } catch { self.error = error.localizedDescription }
@@ -258,16 +263,66 @@ private struct PuzzleExerciseView: View {
                 finishReply()
             }
             .onChange(of: comparingMoves) { _, _ in selected = nil }
-            .onChange(of: scenePhase) { _, phase in
-                if phase == .active { finishReply() }
-                else { attemptTask?.cancel(); motion.stop(); replying = false }
+            .onChange(of: playthrough?.isComplete) { _, complete in
+                if complete == true { attemptTask?.cancel(); updateExploration() }
             }
-            .onDisappear { attemptTask?.cancel(); analyzer.stop(); motion.stop() }
+            .onChange(of: browsingPly) { _, _ in engineReplyTask?.cancel(); updateExploration() }
+            .onChange(of: model.engineConfiguration) { _, _ in updateExploration() }
+            .onChange(of: showAnalysisSettings) { _, showing in
+                if showing { engineReplyTask?.cancel(); analyzer.stop() }
+                else { updateExploration(); scheduleEngineReply() }
+            }
+            .onChange(of: engineReplies) { _, enabled in if enabled { scheduleEngineReply() } else { engineReplyTask?.cancel() } }
+            .onReceive(analyzer.$isCalculating) { calculating in if !calculating { scheduleEngineReply() } }
+            .onReceive(analyzer.$evaluation) { _ in if !analyzer.isCalculating { scheduleEngineReply() } }
+    }
+    var body: some View {
+        trackedContent
+            .onChange(of: scenePhase) { _, phase in
+                if phase == .active { finishReply(); updateExploration() }
+                else { attemptTask?.cancel(); engineReplyTask?.cancel(); analyzer.stop(); motion.stop(); replying = false }
+            }
+            .onDisappear { attemptTask?.cancel(); engineReplyTask?.cancel(); analyzer.stop(); motion.stop() }
+            .sheet(isPresented: $showAnalysisSettings) { EngineSettingsView() }
             .confirmationDialog("Promote your pawn", isPresented: Binding(get: { !promotions.isEmpty }, set: { if !$0 { promotions = [] } })) {
                 ForEach(promotions, id: \.uci) { move in Button(move.promotion?.rawValue.capitalized ?? "Queen") { play(move); promotions = [] } }
             }
     }
+    private func puzzleBoard(_ board: ChessPosition, playthrough: PuzzlePlaythrough) -> some View {
+        let finished = playthrough.isComplete
+        let interactive = (browsingPly == nil || finished) && !motion.isAnimating && !comparingMoves && !replying
+        return LiveAnalysis(controller: analyzer, position: board) { evaluation in
+            AnalysisBoardView(position: board, perspective: playthrough.positions[0].sideToMove, selectedSquare: selected,
+                              targets: targets, highlightedSquares: highlightedSquares,
+                              suggestions: finished ? [] : boardChoices, rejectionCount: motion.rejectionCount,
+                              successCount: motion.successCount, successSquare: motion.successSquare,
+                              evaluation: finished ? evaluation : choiceEvaluation, evaluationPosition: finished ? board : choicePosition,
+                              showArrows: finished, revealEvaluation: finished, onSquare: interactive ? choose : nil)
+        }
+    }
+    @ViewBuilder private func explorationControls(_ board: ChessPosition, playthrough: PuzzlePlaythrough) -> some View {
+        Text("Try a move, or choose a position from the move list.").font(.caption).foregroundStyle(ChessMeStyle.muted)
+        PrimaryButton(title: "Play best move", symbol: "forward.frame") {
+            if let move = analyzer.evaluation(for: board)?.best?.move { playExploration(move) }
+        }.disabled(analyzer.evaluation(for: board)?.best == nil || motion.isAnimating).accessibilityIdentifier("puzzle.bestMove")
+        Toggle("Engine replies", isOn: $engineReplies).font(.subheadline).accessibilityIdentifier("puzzle.engineReplies")
+        HStack {
+            if let exploration, exploration != playthrough.history {
+                Button("Reset variation") { self.exploration = nil; browsingPly = nil; selected = nil; updateExploration() }
+                    .accessibilityIdentifier("puzzle.resetVariation")
+            }
+            Spacer()
+            Button("Analysis settings") { showAnalysisSettings = true }.accessibilityIdentifier("puzzle.analysisSettings")
+        }.font(.caption.weight(.semibold))
+        AnalysisPanel(position: board, controller: analyzer, configuration: model.effectiveEngineConfiguration)
+    }
     private var highlightedSquares: Set<Int> {
+        if playthrough?.isComplete == true, let history = displayedHistory {
+            let index = browsingPly ?? history.moves.count
+            guard index > 0 else { return [] }
+            let move = history.moves[index - 1]
+            return [move.from, move.to]
+        }
         guard browsingPly == nil, !comparingMoves else { return [] }
         if let move = motion.lastMove { return [move.from, move.to] }
         if showHint, let playthrough, !playthrough.isComplete { return [playthrough.solution[playthrough.cursor].from] }
@@ -283,6 +338,7 @@ private struct PuzzleExerciseView: View {
         selected = board.squares[square]?.side == board.sideToMove ? square : nil
     }
     private func play(_ move: ChessMove) {
+        if playthrough?.isComplete == true { playExploration(move); return }
         guard let board = playthrough?.position, let playthrough, !playthrough.isComplete else { return }
         attemptTask?.cancel(); motion.stop()
         comparingMoves = false
@@ -315,6 +371,31 @@ private struct PuzzleExerciseView: View {
                 choiceEvaluation = result
             }
         } catch { self.error = error.localizedDescription }
+    }
+    private func updateExploration() {
+        guard !showAnalysisSettings, playthrough?.isComplete == true, let board = shownPosition, let history = displayedHistory else { return }
+        let index = browsingPly ?? history.moves.count
+        analyzer.start(position: board, history: history.positions.prefix(index).map(\.repetitionKey), configuration: model.effectiveEngineConfiguration)
+    }
+    private func playExploration(_ move: ChessMove) {
+        guard playthrough?.isComplete == true, let history = displayedHistory else { return }
+        let base = history.prefix(through: browsingPly ?? history.moves.count)
+        guard let next = try? base.appending([move]) else { return }
+        engineReplyTask?.cancel()
+        exploration = next; browsingPly = nil; selected = nil
+        updateExploration()
+    }
+    private func scheduleEngineReply() {
+        guard !showAnalysisSettings, engineReplies, playthrough?.isComplete == true, browsingPly == nil,
+              let board = shownPosition, board.sideToMove != playthrough?.positions[0].sideToMove else { return }
+        engineReplyTask?.cancel()
+        engineReplyTask = Task {
+            do { try await Task.sleep(for: .milliseconds(350)) } catch { return }
+            guard !Task.isCancelled, scenePhase == .active, engineReplies, browsingPly == nil,
+                  shownPosition == board, !analyzer.isCalculating,
+                  let move = analyzer.evaluation(for: board)?.best?.move else { return }
+            playExploration(move)
+        }
     }
     private func finishReply() {
         do { try playthrough?.playReply() } catch { self.error = error.localizedDescription }

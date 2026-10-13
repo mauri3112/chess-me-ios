@@ -463,16 +463,14 @@ final class ChessMeUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Line complete"].waitForExistence(timeout: 5))
         capture("Puzzle board celebration stays in place")
         XCTAssertEqual(puzzleSquare.frame.minY, puzzleBoardTop, accuracy: 1, "Puzzle completion must not move the board squares.")
-        let compare = app.buttons["training.compareMoves"]
-        for _ in 0..<3 where !compare.isHittable { app.scrollViews["puzzle.scroll"].swipeUp() }
+        XCTAssertFalse(app.buttons["training.compareMoves"].exists)
+        let bestMove = app.buttons["puzzle.bestMove"]
+        for _ in 0..<3 where !bestMove.isHittable { app.scrollViews["puzzle.scroll"].swipeUp() }
+        XCTAssertTrue(bestMove.isHittable)
         let bar = app.descendants(matching: .any)["analysis.evaluation"]
         let evaluated = expectation(for: NSPredicate(format: "value != '?'"), evaluatedWith: bar)
         wait(for: [evaluated], timeout: 15)
-        let score = bar.value as? String
-        compare.tap()
-        XCTAssertEqual(bar.value as? String, score)
-        compare.tap()
-        XCTAssertEqual(bar.value as? String, score)
+        XCTAssertTrue(app.buttons["puzzle.analysisSettings"].exists)
         let favorite = app.buttons["favorite.toggle"]
         for _ in 0..<3 where !favorite.isHittable { app.scrollViews["puzzle.scroll"].swipeDown() }
         favorite.tap()
@@ -481,6 +479,42 @@ final class ChessMeUITests: XCTestCase {
         app.buttons["practice.saved"].tap()
         XCTAssertTrue(app.staticTexts["Lichess puzzles"].waitForExistence(timeout: 5))
         capture("Favorite Lichess puzzle")
+    }
+
+    func testCompletedPuzzleAllowsTrialMovesAndAutomaticEngineReplies() throws {
+        openPracticeHome()
+        app.buttons["practice.puzzles"].tap()
+        XCTAssertTrue(app.buttons["puzzles.play"].waitForExistence(timeout: 15))
+        app.buttons["puzzles.play"].tap()
+        let reveal = app.buttons["puzzle.reveal"]
+        for _ in 0..<3 where !reveal.isHittable { app.scrollViews["puzzle.scroll"].swipeUp() }
+        let introductionFinished = expectation(for: NSPredicate(format: "enabled == true"), evaluatedWith: reveal)
+        wait(for: [introductionFinished], timeout: 10)
+        reveal.tap()
+        XCTAssertTrue(app.staticTexts["See the solution"].waitForExistence(timeout: 5))
+        let previous = app.buttons["puzzle.previousMove"]
+        for _ in 0..<3 where !previous.isHittable { app.scrollViews["puzzle.scroll"].swipeUp() }
+        previous.tap(); previous.tap(); previous.tap()
+        XCTAssertEqual(app.buttons["puzzle.move.1"].value as? String, "Current position")
+        XCTAssertFalse(app.buttons["training.compareMoves"].exists)
+        let bishop = app.buttons["board.square.a2"]
+        for _ in 0..<3 where !bishop.isHittable { app.scrollViews["puzzle.scroll"].swipeDown() }
+        bishop.tap(); app.buttons["board.square.c4"].tap()
+        let reset = app.buttons["puzzle.resetVariation"]
+        for _ in 0..<3 where !reset.isHittable { app.scrollViews["puzzle.scroll"].swipeUp() }
+        XCTAssertTrue(reset.isHittable)
+        let best = app.buttons["puzzle.bestMove"]
+        let ready = expectation(for: NSPredicate(format: "enabled == true"), evaluatedWith: best)
+        wait(for: [ready], timeout: 25)
+        let replies = app.switches["puzzle.engineReplies"]
+        replies.tap()
+        let replied = expectation(for: NSPredicate(format: "value == 'Current position'"), evaluatedWith: app.buttons["puzzle.move.3"])
+        wait(for: [replied], timeout: 25)
+        capture("Completed puzzle supports trial moves and engine replies")
+        reset.tap()
+        XCTAssertEqual(app.buttons["puzzle.move.4"].value as? String, "Current position")
+        XCTAssertFalse(reset.exists)
+        capture("Reset restores the original solved puzzle without regrading")
     }
 
     func testWrongLessonMoveBouncesBackAndAllowsAnImmediateRetry() throws {

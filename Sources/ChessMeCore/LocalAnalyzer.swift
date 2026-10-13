@@ -45,6 +45,7 @@ public struct PositionEvaluation: Sendable {
     public let moves: [MoveEvaluation]
     public let completedDepth: Int
     public let nodes: Int
+    public var elapsedSeconds: Double? = nil
     public var limit: String? = nil
     public var best: MoveEvaluation? { moves.first }
 }

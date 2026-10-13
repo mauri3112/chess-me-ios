@@ -46,9 +46,10 @@ void option(const std::string &name, const std::string &value) {
     std::istringstream command("name " + name + " value " + value);
     engine->get_options().setoption(command);
 }
-std::string json(const Snapshot &snapshot, const std::string &limit) {
+std::string json(const Snapshot &snapshot, const std::string &limit, int64_t elapsedMilliseconds) {
     std::ostringstream output;
     output << "{\"depth\":" << snapshot.depth << ",\"nodes\":" << snapshot.nodes
+           << ",\"elapsedMilliseconds\":" << elapsedMilliseconds
            << ",\"limit\":\"" << limit << "\",\"lines\":[";
     bool first = true;
     for (const auto &line : snapshot.lines) {
@@ -112,10 +113,12 @@ int chessme_stockfish_analyze(const char *network, const char *initialFen, const
             std::map<int, Snapshot> complete;
             std::map<int, std::map<size_t, Line>> iterations;
             std::atomic<bool> finished(false);
+            std::mutex updatesMutex;
             auto lastUpdate = Clock::now() - std::chrono::seconds(1);
             uint64_t phaseNodes = 0;
             option("MultiPV", std::to_string(multiPV));
             engine->set_on_update_full([&](const Stockfish::Engine::InfoFull &info) {
+                std::lock_guard<std::mutex> guard(updatesMutex);
                 phaseNodes = std::max(phaseNodes, static_cast<uint64_t>(info.nodes));
                 // output_pv emits a fresh 1...N batch. Later lines can still
                 // have the previous depth while the next iteration is partial.
@@ -137,7 +140,7 @@ int chessme_stockfish_analyze(const char *network, const char *initialFen, const
                 if (update && Clock::now() - lastUpdate >= std::chrono::milliseconds(250)) {
                     auto heartbeat = root.empty() ? snapshot : latest;
                     heartbeat.nodes = totalNodes + phaseNodes;
-                    const auto payload = json(heartbeat, "");
+                    const auto payload = json(heartbeat, "", std::chrono::duration_cast<std::chrono::milliseconds>(Clock::now() - began).count());
                     update(payload.c_str(), context);
                     lastUpdate = Clock::now();
                 }
@@ -155,6 +158,18 @@ int chessme_stockfish_analyze(const char *network, const char *initialFen, const
             while (!finished.load()) {
                 if (isCancelled()) { interrupted = true; engine->stop(); }
                 if (Clock::now() >= phaseDeadline) engine->stop();
+                // A deep iteration can take many seconds. Report actual search
+                // time without inventing a new depth or mixing partial PVs.
+                {
+                    std::lock_guard<std::mutex> guard(updatesMutex);
+                    if (update && !latest.lines.empty() && Clock::now() - lastUpdate >= std::chrono::seconds(1)) {
+                        auto heartbeat = latest;
+                        heartbeat.nodes = totalNodes + phaseNodes;
+                        const auto payload = json(heartbeat, "", std::chrono::duration_cast<std::chrono::milliseconds>(Clock::now() - began).count());
+                        update(payload.c_str(), context);
+                        lastUpdate = Clock::now();
+                    }
+                }
                 std::this_thread::sleep_for(std::chrono::milliseconds(10));
             }
             engine->wait_for_search_finished();
@@ -199,7 +214,8 @@ int chessme_stockfish_analyze(const char *network, const char *initialFen, const
         }
         result.nodes = totalNodes;
         std::stable_sort(result.lines.begin(), result.lines.end(), [](const Line &a, const Line &b) { return a.score > b.score; });
-        const auto payload = json(result, result.depth < target ? "Search budget reached" : "");
+        const auto payload = json(result, result.depth < target ? "Search budget reached" : "",
+                                  std::chrono::duration_cast<std::chrono::milliseconds>(Clock::now() - began).count());
         if (update) update(payload.c_str(), context);
         return 0;
     } catch (...) { return 5; }

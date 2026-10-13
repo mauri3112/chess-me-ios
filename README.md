@@ -1,6 +1,6 @@
 # ChessMe iOS source
 
-Corresponding client source for ChessMe 0.2.0 build 22, tag `ios-0.2.0-build22`.
+Corresponding client source for ChessMe 0.2.0 build 23, tag `ios-0.2.0-build23`.
 The original iOS app and shared core use GNU GPL version 3 only. See LICENSE and
 CLIENT-LICENSE.md. Third-party notices and compatible licences remain intact.
 The cloud backend is separately operated and is not included here.
@@ -42,7 +42,11 @@ headroom. Estimated games per night use recent game lengths and complete
 measured reviews from this device. Estimates are capacity planning, not a
 promise that iOS grants uninterrupted background time. Reviews report
 achieved depth and save completed decisions. User-started work requests continued
-processing on iOS 26 or later; overnight jobs run while charging between 22:00
+processing with regular measured search-time progress, including long iterations.
+Background grants and expiration callbacks are matched to their own batch;
+completed foreground work also handles delayed grants safely. Interrupted jobs
+retain the reason for waiting and their saved decisions.
+Continued processing uses iOS 26 or later; overnight jobs run while charging between 22:00
 and 07:00 when iOS grants processing time. System interruption, force quitting,
 Low Power Mode, thermal state and memory pressure can delay completion.
 
@@ -55,6 +59,9 @@ reviews. Longer queues expand to every game. Games can be filtered by Saved and
 Reviewed together; partial reviews remain outside the Reviewed filter.
 Recorded results determine win/loss colors; engine evaluations never infer a
 winner. Practice browsing and trial branches keep the original game intact.
+After a puzzle is solved or revealed, its board supports legal trial moves, live
+device evaluation, best-move playback, optional engine replies and analysis
+settings. Variations can be reset without changing the puzzle or practice grade.
 
 The public repository publishes source only. The requested binary distribution
 is internal TestFlight. There is no warranty. The source-manifest.json file

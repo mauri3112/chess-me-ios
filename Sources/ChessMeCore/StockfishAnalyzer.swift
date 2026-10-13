@@ -44,6 +44,7 @@ private final class StockfishCallbacks {
         struct Line: Decodable { let score: Int; let moves: [String] }
         let depth: Int
         let nodes: Int
+        let elapsedMilliseconds: Int?
         let limit: String
         let lines: [Line]
     }
@@ -67,6 +68,7 @@ private final class StockfishCallbacks {
             return MoveEvaluation(move: first, score: line.score, continuation: moves)
         }
         let snapshot = PositionEvaluation(moves: lines, completedDepth: value.depth, nodes: value.nodes,
+                                          elapsedSeconds: value.elapsedMilliseconds.map { Double($0) / 1_000 },
                                           limit: value.limit.isEmpty ? nil : value.limit)
         result = snapshot
         update(snapshot)

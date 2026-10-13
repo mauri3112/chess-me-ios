@@ -2,6 +2,26 @@ import XCTest
 @testable import ChessMeCore
 
 final class StockfishTests: XCTestCase {
+    func testDeepSearchReportsElapsedTimeWithoutInventingCompletedDepth() throws {
+        let started = ProcessInfo.processInfo.systemUptime
+        var lastUpdate = started
+        var longestGap = 0.0
+        var elapsed = 0.0
+        let result = try LocalAnalyzer(options: AnalysisOptions(maximumDepth: 64, memoryMegabytes: 16,
+            timeLimitSeconds: 3, engine: .stockfish, searchNodeLimit: 100_000_000)).evaluate(position: .initial, update: { snapshot in
+                let now = ProcessInfo.processInfo.systemUptime
+                longestGap = max(longestGap, now - lastUpdate); lastUpdate = now
+                let measured = snapshot.elapsedSeconds ?? -1
+                XCTAssertGreaterThanOrEqual(measured, elapsed)
+                elapsed = measured
+                XCTAssertGreaterThan(snapshot.completedDepth, 0)
+                XCTAssertEqual(Set(snapshot.moves.map(\.move)).count, snapshot.moves.count)
+            })
+        XCTAssertGreaterThan(elapsed, 1)
+        XCTAssertLessThan(longestGap, 2, "A working deep search must keep reporting during long iterations")
+        XCTAssertLessThan(result.completedDepth, 64)
+        XCTAssertNotNil(result.limit)
+    }
     func testMultiPVUpdatesContainDistinctLegalRootMoves() throws {
         let position = try ChessPosition(fen: "rnbqkbnr/pppp1ppp/8/4p3/4P3/8/PPPP1PPP/RNBQKBNR w KQkq e6 0 2")
         var updates = 0
