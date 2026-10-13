@@ -18,7 +18,7 @@ extension AppModel {
         schedulePuzzleMatches()
     }
     var favoriteGames: [ChessGame] { library.games.filter { (library.favoriteGameIDs ?? []).contains($0.id) }.sorted { $0.playedAt > $1.playedAt } }
-    var favoriteFindings: [MoveFinding] { library.favoriteFindings ?? [] }
+    var favoriteFindings: [MoveFinding] { (library.favoriteFindings ?? []).filter { isReviewableFinding($0) } }
     var favoritePuzzles: [TrainingPuzzle] { library.favoritePuzzles ?? [] }
     var recommendedPuzzles: [TrainingPuzzle] {
         var seen = Set<String>()

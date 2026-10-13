@@ -1,6 +1,6 @@
 # ChessMe iOS source
 
-Corresponding client source for ChessMe 0.2.0 build 18, tag `ios-0.2.0-build18`.
+Corresponding client source for ChessMe 0.2.0 build 19, tag `ios-0.2.0-build19`.
 The original iOS app and shared core use GNU GPL version 3 only. See LICENSE and
 CLIENT-LICENSE.md. Third-party notices and compatible licences remain intact.
 The cloud backend is separately operated and is not included here.
@@ -26,6 +26,15 @@ Vendor/Stockfish. Exact NNUE networks and licence resources are included in
 Sources/ChessMeCore/Resources. Stockfish's network checksum and pinned upstream
 commit are in Vendor/Stockfish/provenance.json. Arasan 26 remains an alternative.
 Asset-generation sources are included under docs/design.
+
+The full CC0 Lichess opening catalogue is pinned in Vendor/LichessOpenings.
+Its offline position/move index is Sources/ChessMeCore/Resources/OpeningBook.json.
+To reproduce the index, run `uv run --with python-chess python
+scripts/generate-opening-book.py` (one command on one line). Source checksums
+are verified before generation. Book labels preserve engine scores and exclude
+opening theory from mistake cards, counts and recommendations. Verified mate
+errors in named traps remain visible. Recognition follows each recorded line's
+length and supports transpositions without restarting theory after repetitions.
 
 Settings > On-device analysis offers depth targets 24, 28 and 32 on supported
 iPhones and iPads, including the base iPhone 15. Memory use adapts to app

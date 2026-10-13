@@ -27,6 +27,25 @@ struct GameDetailView: View {
     private var moment: MoveFinding? { moments.indices.contains(momentIndex) ? moments[momentIndex] : nil }
     private var analysis: GameAnalysis? { model.gameAnalysis(for: game.id) }
     private var savedGame: ChessGame { model.library.games.first { $0.id == game.id } ?? game }
+    private var openingLine: OpeningLine? { model.openingLine(for: savedGame) }
+    private var bookPlies: Set<Int> {
+        let nonBook = Set((analysis?.moveAssessments ?? []).filter { $0.quality != .book }.map(\.ply))
+        return Set(openingLine?.moves.keys.map { $0 } ?? []).subtracting(nonBook)
+    }
+    private var displayedQuality: MoveQuality? {
+        if let assessment { return assessment.quality }
+        guard let replay else { return nil }
+        if replay.isVariation {
+            return OpeningBook.shared.line(in: replay, includingVariation: true).moves[replay.index + replay.variationMoves.count - 1] != nil ? .book : nil
+        }
+        guard bookPlies.contains(replay.index - 1) else { return nil }
+        return .book
+    }
+    private var currentOpening: OpeningVariation? {
+        guard let replay else { return nil }
+        if replay.isVariation { return OpeningBook.shared.line(in: replay, includingVariation: true).opening }
+        return assessment?.opening ?? openingLine?.opening(at: replay.index)
+    }
     @State private var showLocalSettings = false
     private var deviceReviewAlreadyActive: Bool {
         guard let job = model.localAnalysisJob(for: game.id) else { return false }
@@ -58,6 +77,16 @@ struct GameDetailView: View {
                         exploring.toggle()
                         if !exploring { selectMoment(momentIndex) }
                     }.font(.subheadline.weight(.semibold)).frame(minHeight: 44).accessibilityIdentifier("game.explore")
+                }
+                if let opening = openingLine?.opening {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Label(opening.name, systemImage: "book.closed.fill")
+                            .font(.subheadline.weight(.semibold)).foregroundStyle(ChessMeStyle.ink)
+                            .accessibilityIdentifier("game.openingName")
+                        Text("\(opening.eco) · \(bookPlies.count) book moves")
+                            .font(.caption).foregroundStyle(ChessMeStyle.muted)
+                            .accessibilityIdentifier("game.bookSummary")
+                    }
                 }
                 if !exploring, let moment {
                     HStack {
@@ -143,7 +172,7 @@ struct GameDetailView: View {
                         }
                     }
                     if exploring || moments.isEmpty {
-                        MoveHistoryView(history: replay.moveHistory, selectedIndex: replay.index, prefix: "game", title: nil, showsNavigation: false) { index in exploring = true; navigate(index) }
+                        MoveHistoryView(history: replay.moveHistory, selectedIndex: replay.index, prefix: "game", title: nil, showsNavigation: false, bookPlies: bookPlies) { index in exploring = true; navigate(index) }
                         if replay.isVariation {
                             Text(replay.variationSAN).font(.subheadline.monospaced()).accessibilityIdentifier("game.variation")
                             Button("Return to game") { navigate(replay.index) }.font(.subheadline.weight(.semibold))
@@ -152,7 +181,15 @@ struct GameDetailView: View {
                             Slider(value: Binding(get: { Double(self.replay?.index ?? 0) }, set: { navigate(Int($0)) }), in: 0...Double(max(1, replay.moves.count)), step: 1)
                                 .accessibilityLabel("Game move").accessibilityIdentifier("game.timeline")
                         }
-                        if let assessment { MoveQualityBadge(quality: assessment.quality).accessibilityIdentifier("game.moveQuality") }
+                        if let displayedQuality {
+                            HStack(alignment: .top, spacing: 10) {
+                                MoveQualityBadge(quality: displayedQuality).accessibilityIdentifier("game.moveQuality")
+                                if displayedQuality == .book, let opening = currentOpening {
+                                    Text(opening.name).font(.caption).foregroundStyle(ChessMeStyle.muted).padding(.top, 6)
+                                        .accessibilityIdentifier("game.currentOpening")
+                                }
+                            }
+                        }
                         if exploring { AnalysisPanel(position: replay.position, controller: analyzer, configuration: model.effectiveEngineConfiguration) }
                     }
                 }
@@ -322,7 +359,14 @@ struct GameDetailView: View {
     private func play(_ move: ChessMove) {
         guard let replay else { return }
         variationAssessment = analyzer.evaluation?.assessment(position: replay.position, played: move, ply: replay.index + replay.variationMoves.count)
-        do { try self.replay?.play(move); selected = nil } catch { replayError = error.localizedDescription }
+        do {
+            try self.replay?.play(move)
+            if let trial = self.replay, let assessment = variationAssessment {
+                let sample = GameAnalysis(gameID: game.id, findings: [], analyzedPlies: 1, totalPlies: 1, moveAssessments: [assessment])
+                variationAssessment = OpeningBook.shared.line(in: trial, includingVariation: true).annotating(sample).moveAssessments?.first
+            }
+            selected = nil
+        } catch { replayError = error.localizedDescription }
     }
 }
 

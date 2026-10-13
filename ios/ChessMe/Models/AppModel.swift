@@ -7,6 +7,8 @@ import CryptoKit
 @MainActor
 final class AppModel: ObservableObject {
     @Published private(set) var library = LibrarySnapshot()
+    private var openingLines: [String: (game: ChessGame, line: OpeningLine?)] = [:]
+    private var openingReviews: [String: (game: ChessGame, original: GameAnalysis, annotated: GameAnalysis)] = [:]
     @Published var selectedWindow: ReviewWindow = .day
     @Published var reviewCutoff = Date()
     @Published var showPaywall = false
@@ -94,7 +96,7 @@ final class AppModel: ObservableObject {
         self.puzzleService = puzzleService
         self.lichessService = lichessService
         usesEphemeralLibrary = previewLibrary != nil
-        if let previewLibrary { library = previewLibrary; return }
+        if let previewLibrary { library = previewLibrary; normalizeOpeningReviews(); return }
         do {
             let storage = try LocalLibrary()
             do {
@@ -108,6 +110,7 @@ final class AppModel: ObservableObject {
             storageInitializationFailed = true
             notice = "Your saved library could not be opened. It has not been deleted. \(error.localizedDescription)"
         }
+        if normalizeOpeningReviews(), canSaveLibrary { persist() }
         _ = deviceAnalysis
     }
 
@@ -202,6 +205,7 @@ final class AppModel: ObservableObject {
         return review?.isComplete == true ? "Analyze deeper on this device" : "Analyze on this device"
     }
     func reconcileLocalAnalysisResults() {
+        normalizeOpeningReviews()
         let saved = Dictionary(library.analyses.map { ($0.gameID, $0) }, uniquingKeysWith: { first, _ in first })
         for job in library.localAnalysisJobs ?? [] {
             if let checkpoint = job.checkpoint, checkpoint.gameID == job.gameID, checkpoint.source == "device", checkpoint.isComplete {
@@ -217,6 +221,7 @@ final class AppModel: ObservableObject {
         isAnalyzing = running; self.progress = progress; progressMessage = message
     }
     func acceptDeviceCheckpoint(_ analysis: GameAnalysis) {
+        let analysis = library.games.first { $0.id == analysis.gameID }.flatMap { openingLine(for: $0) }?.annotating(analysis) ?? analysis
         // Keep a complete cloud/older review visible until its replacement is complete.
         if !analysis.isComplete, library.analyses.contains(where: { $0.gameID == analysis.gameID && $0.isComplete }) { return }
         if analysis.isComplete, let job = library.localAnalysisJobs?.first(where: { $0.checkpoint == analysis }),
@@ -304,7 +309,55 @@ final class AppModel: ObservableObject {
     var practiceCount: Int { library.practice.reduce(0) { $0 + $1.correctCount + $1.failedCount + ($1.assistedCount ?? 0) } }
     var isBusy: Bool { isImporting || isAnalyzing || cloudIsRunning || cloudBatchSubmitting }
 
-    func updateLibrary(_ changes: (inout LibrarySnapshot) -> Void) { changes(&library) }
+    func updateLibrary(_ changes: (inout LibrarySnapshot) -> Void) {
+        changes(&library)
+        normalizeOpeningReviews()
+    }
+
+    func openingLine(for game: ChessGame) -> OpeningLine? {
+        if let cached = openingLines[game.id], cached.game.hasSameMainline(as: game), cached.game.status == game.status { return cached.line }
+        let line = (try? GameReplay(game: game)).map { OpeningBook.shared.line(in: $0) }
+        openingLines[game.id] = (game, line)
+        return line
+    }
+
+    /// Correct previous device/cloud reviews and cached jobs without restarting their engine work.
+    @discardableResult
+    private func normalizeOpeningReviews() -> Bool {
+        guard OpeningBook.shared.isAvailable else { return false }
+        let games = Dictionary(library.games.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        var changedGames = Set<String>()
+        var changed = false
+        func normalize(_ review: GameAnalysis, cacheKey: String) -> GameAnalysis {
+            guard let game = games[review.gameID], let line = openingLine(for: game) else { return review }
+            if let cached = openingReviews[cacheKey], cached.game.hasSameMainline(as: game), cached.game.status == game.status,
+               review == cached.original || review == cached.annotated { return cached.annotated }
+            let result = line.annotating(review)
+            openingReviews[cacheKey] = (game, review, result)
+            if result.findings != review.findings { changedGames.insert(game.id) }
+            return result
+        }
+        let analyses = library.analyses.map { normalize($0, cacheKey: "current:" + $0.gameID) }
+        if analyses != library.analyses { library.analyses = analyses; changed = true }
+        let history = library.analysisHistory?.enumerated().map { normalize($0.element, cacheKey: "history:\($0.offset)") }
+        if history != library.analysisHistory { library.analysisHistory = history; changed = true }
+        for index in (library.localAnalysisJobs ?? []).indices {
+            if let review = library.localAnalysisJobs?[index].checkpoint {
+                let result = normalize(review, cacheKey: "job:" + (library.localAnalysisJobs?[index].id ?? "\(index)"))
+                if result != review { library.localAnalysisJobs?[index].checkpoint = result; changed = true }
+            }
+        }
+        // Keep completed practice records, but stop recommending tactics from a corrected book move.
+        if !changedGames.isEmpty { library.puzzleRecommendations?.removeAll { changedGames.contains($0.gameID) && $0.analysisSignature != "demonstration" } }
+        return changed
+    }
+
+    func isReviewableFinding(_ finding: MoveFinding) -> Bool {
+        guard let game = library.games.first(where: { $0.id == finding.gameID }), let line = openingLine(for: game) else { return true }
+        let sample = GameAnalysis(gameID: game.id, findings: [finding], analyzedPlies: 0, totalPlies: 0,
+                                  source: finding.source, moveAssessments: library.analyses.first { $0.gameID == game.id }?.moveAssessments)
+        return !line.annotating(sample).findings.isEmpty
+    }
 
     func prepare() async {
         guard !didPrepare else { return }
@@ -321,6 +374,7 @@ final class AppModel: ObservableObject {
             if let data = ProcessInfo.processInfo.environment["CHESSME_UI_TEST_LIBRARY"]?.data(using: .utf8),
                let fixture = try? JSONDecoder().decode(LibrarySnapshot.self, from: data), fixture.isDemo {
                 library = fixture
+                normalizeOpeningReviews()
                 reviewCutoff = Date()
                 return
             }
@@ -537,6 +591,7 @@ final class AppModel: ObservableObject {
     func endSession() { activeLesson = nil; sessionTab = nil; session = []; sessionIndex = 0; sessionFinished = false; sessionOutcomes = [:] }
 
     private func saveAnalysis(_ analysis: GameAnalysis) {
+        let analysis = library.games.first { $0.id == analysis.gameID }.flatMap { openingLine(for: $0) }?.annotating(analysis) ?? analysis
         if library.analyses.first(where: { $0.gameID == analysis.gameID }) == analysis { return }
         if let previous = library.analyses.first(where: { $0.gameID == analysis.gameID }),
            previous.source != analysis.source || previous.configurationID != analysis.configurationID || previous.engineVersion != analysis.engineVersion {
@@ -552,6 +607,7 @@ final class AppModel: ObservableObject {
 
     func deleteLocalData() {
         guard !isBusy else { notice = "Pause analysis before deleting your library."; return }
+        defer { openingLines.removeAll(); openingReviews.removeAll() }
         deviceAnalysis.clear()
         cancelPuzzleMatches(); endSession(); resetCloudAccess()
         syncMessage = nil

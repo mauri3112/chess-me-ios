@@ -96,12 +96,12 @@ struct LearningTests {
         var games: [ChessGame] = [], analyses: [GameAnalysis] = []
         for index in 0..<count {
             let game = ChessGame(id: "sample-\(index)", username: "Learner", white: "Learner", black: "Partner",
-                                 playedAt: Date(), playerSide: .white, moves: "e4 e5 Nf3 Nc6", status: "resign")
+                                 playedAt: Date(), playerSide: .white, moves: "e4 e5 h4 Nc6", status: "resign")
             let replay = try GameReplay(game: game)
             let assessments = [0, 2].map { ply in
                 MoveAssessment(ply: ply, positionFEN: replay.positions[ply].fen, playedMove: replay.moves[ply].uci,
-                               bestMove: ply == 0 ? "d2d4" : "g1f3", quality: ply == 0 ? .mistake : .best,
-                               centipawnLoss: ply == 0 ? 150 : 0, whiteScore: -150, completedDepth: depth, isProvisional: true)
+                               bestMove: ply == 0 ? "e2e4" : "g1f3", quality: ply == 2 ? .mistake : .best,
+                               centipawnLoss: ply == 2 ? 150 : 0, whiteScore: -150, completedDepth: depth, isProvisional: true)
             }
             games.append(game)
             analyses.append(GameAnalysis(gameID: game.id, findings: [], analyzedPlies: 2, totalPlies: 2, moveAssessments: assessments))
@@ -119,7 +119,7 @@ struct LearningTests {
         let opportunity = try #require(report.opportunities.first)
         #expect(opportunity.visits == 30)
         #expect(opportunity.mistakes == 30)
-        #expect(opportunity.suggestedSAN == "d4")
+        #expect(opportunity.suggestedSAN == "Nf3")
         #expect(opportunity.averageLoss == 150)
         #expect(opportunity.totalLoss == 4500)
     }

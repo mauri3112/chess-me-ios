@@ -143,6 +143,7 @@ struct MoveQualityBadge: View {
     var estimated = true
     private var color: Color {
         switch quality {
+        case .book: return ChessMeStyle.ink
         case .brilliant, .best, .excellent, .good: return ChessMeStyle.green
         case .inaccuracy: return .orange
         case .mistake, .blunder: return .red
@@ -154,7 +155,7 @@ struct MoveQualityBadge: View {
             .font(.caption.weight(.semibold)).foregroundStyle(color)
             .padding(.horizontal, 10).padding(.vertical, 6)
             .background(color.opacity(0.09), in: Capsule())
-            .accessibilityLabel((estimated && quality != .unclassified ? "Estimated " : "") + quality.title)
+            .accessibilityLabel((estimated && quality != .unclassified && quality != .book ? "Estimated " : "") + quality.title)
     }
 }
 
@@ -210,7 +211,7 @@ struct EvaluationTimeline: View {
                         let matches = highlightedQuality == assessment.quality
                         let p = layout.point(for: assessment), radius: CGFloat = matches || assessment.ply + 1 == selectedPly ? 5 : 3
                         let dot = Path(ellipseIn: CGRect(x: p.x - radius, y: p.y - radius, width: radius * 2, height: radius * 2))
-                        let color: Color = assessment.quality == .blunder || assessment.quality == .mistake ? .red : assessment.quality == .inaccuracy ? .orange : ChessMeStyle.green
+                        let color: Color = assessment.quality == .book ? ChessMeStyle.muted : assessment.quality == .blunder || assessment.quality == .mistake ? .red : assessment.quality == .inaccuracy ? .orange : ChessMeStyle.green
                         context.fill(dot, with: .color(color.opacity(highlightedQuality == nil || matches ? 1 : 0.18)))
                         if matches {
                             context.stroke(Path(ellipseIn: CGRect(x: p.x - 7, y: p.y - 7, width: 14, height: 14)), with: .color(color), lineWidth: 1)

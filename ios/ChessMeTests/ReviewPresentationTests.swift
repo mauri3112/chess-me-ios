@@ -117,4 +117,81 @@ final class ReviewPresentationTests: XCTestCase {
         XCTAssertEqual(layout.nearest(to: 300, assessments: values)?.ply, 8)
         XCTAssertEqual(layout.nearest(to: 0, assessments: values)?.ply, 0)
     }
+
+    private func legacyOpeningReview(game: ChessGame, configuration: DeviceEngineConfiguration, source: String = "device") throws -> GameAnalysis {
+        let replay = try GameReplay(game: game)
+        let assessments = [0, 2].map { ply in
+            MoveAssessment(ply: ply, positionFEN: replay.positions[ply].fen, playedMove: replay.moves[ply].uci,
+                           bestMove: ply == 0 ? "d2d4" : "g1f3", quality: .mistake, centipawnLoss: 200,
+                           whiteScore: -200, completedDepth: 24, isProvisional: true)
+        }
+        let findings = assessments.map { value in
+            MoveFinding(id: "\(game.id)-\(value.ply)", gameID: game.id, gameLabel: game.label, positionFEN: value.positionFEN,
+                        playedMove: value.playedMove, bestMove: value.bestMove, acceptedMoves: [value.bestMove], continuation: [value.bestMove],
+                        centipawnLoss: 200, theme: "Forcing moves", explanation: "Old engine label", hint: "Check",
+                        moveNumber: replay.positions[value.ply].fullmoveNumber, source: source)
+        }
+        return GameAnalysis(gameID: game.id, findings: findings, analyzedPlies: 2, totalPlies: 2, source: source,
+                            engineVersion: StockfishEngine.version, configurationID: configuration.options.configurationID, moveAssessments: assessments)
+    }
+
+    @MainActor
+    func testRestoredBookMistakesAreCorrectedInCachedJobsHistoryAndRecommendations() throws {
+        let game = ChessGame(id: "opening-restored", username: "Learner", white: "Learner", black: "Partner", playedAt: Date(),
+                             playerSide: .white, moves: "e4 e5 h4 Nc6", status: "resign")
+        let configuration = AppModel(previewLibrary: LibrarySnapshot()).deepConfiguration(.balanced)
+        let review = try legacyOpeningReview(game: game, configuration: configuration)
+        var job = LocalAnalysisJob(gameID: game.id, configuration: configuration, level: .balanced, nightOnly: true)
+        job.state = .completed; job.checkpoint = review
+        let practice = PracticeRecord(findingID: review.findings[0].id, correctCount: 3, failedCount: 1, dueAt: Date(), lastPracticedAt: Date())
+        let recommendation = PuzzleRecommendationSet(gameID: game.id, analysisSignature: "old-mistake-labels", rating: 1200, matches: [], matchedAt: Date())
+        let snapshot = LibrarySnapshot(games: [game], practice: [practice], isDemo: true,
+            analysisHistory: [try legacyOpeningReview(game: game, configuration: configuration, source: "cloud")],
+            favoriteFindings: [review.findings[0]], puzzleRecommendations: [recommendation], localAnalysisJobs: [job])
+        let model = AppModel(previewLibrary: snapshot)
+        model.reconcileLocalAnalysisResults()
+        let result = try XCTUnwrap(model.gameAnalysis(for: game.id))
+        XCTAssertEqual(result.moveAssessments?.map(\.quality), [.book, .mistake])
+        XCTAssertEqual(result.findings.map(\.playedMove), ["h2h4"])
+        XCTAssertEqual(result.completedAt, review.completedAt)
+        XCTAssertEqual(result.configurationID, review.configurationID)
+        XCTAssertEqual(model.library.analysisHistory?.first?.moveAssessments?.first?.quality, .book)
+        XCTAssertTrue(model.library.puzzleRecommendations?.isEmpty == true)
+        XCTAssertTrue(model.favoriteFindings.isEmpty)
+        XCTAssertEqual(model.library.favoriteFindings?.first?.id, review.findings[0].id, "Saved bookmarks remain recoverable")
+        XCTAssertEqual(model.library.practice.first?.correctCount, 3)
+        XCTAssertEqual(model.localAnalysisJob(for: game.id)?.state, .completed)
+        XCTAssertNil(model.deviceReviewAction(for: game.id))
+    }
+
+    @MainActor
+    func testIncomingCloudReviewUsesBookLabelsAndKeepsSourceAndRemainingMistake() throws {
+        let game = ChessGame(id: "opening-cloud", username: "Learner", white: "Learner", black: "Partner", playedAt: Date(),
+                             playerSide: .white, moves: "e4 e5 h4 Nc6", status: "resign")
+        let model = AppModel(previewLibrary: LibrarySnapshot(games: [game], isDemo: true))
+        let review = try legacyOpeningReview(game: game, configuration: model.deepConfiguration(.balanced), source: "cloud")
+        model.acceptDeviceCheckpoint(review)
+        XCTAssertEqual(model.gameAnalysis(for: game.id)?.source, "cloud")
+        XCTAssertEqual(model.gameAnalysis(for: game.id)?.moveAssessments?.first?.quality, .book)
+        XCTAssertEqual(model.findings.map(\.playedMove), ["h2h4"])
+    }
+
+    @MainActor
+    func testOpeningCorrectionDoesNotCompleteAPartialCheckpoint() throws {
+        let game = ChessGame(id: "opening-partial", username: "Learner", white: "Learner", black: "Partner", playedAt: Date(),
+                             playerSide: .white, moves: "e4 e5 h4 Nc6", status: "resign")
+        let model = AppModel(previewLibrary: LibrarySnapshot(games: [game], isDemo: true))
+        let configuration = model.deepConfiguration(.balanced)
+        let saved = try legacyOpeningReview(game: game, configuration: configuration)
+        let partial = GameAnalysis(gameID: game.id, findings: Array(saved.findings.prefix(1)), analyzedPlies: 1, totalPlies: 2,
+            completedAt: saved.completedAt, engineVersion: saved.engineVersion, configurationID: saved.configurationID,
+            moveAssessments: Array(saved.moveAssessments!.prefix(1)))
+        var job = LocalAnalysisJob(gameID: game.id, configuration: configuration, level: .balanced, nightOnly: true)
+        job.state = .running; job.checkpoint = partial
+        model.updateLibrary { $0.localAnalysisJobs = [job] }
+        XCTAssertEqual(model.gameAnalysis(for: game.id)?.moveAssessments?.first?.quality, .book)
+        XCTAssertEqual(model.gameAnalysis(for: game.id)?.analyzedPlies, 1)
+        XCTAssertFalse(model.gameAnalysis(for: game.id)?.isComplete ?? true)
+        XCTAssertEqual(model.localAnalysisJob(for: game.id)?.state, .running)
+    }
 }

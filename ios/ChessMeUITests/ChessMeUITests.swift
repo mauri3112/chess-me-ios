@@ -779,7 +779,7 @@ final class ChessMeUITests: XCTestCase {
         XCTAssertGreaterThan(explore.frame.minX, match.frame.minX)
         for name in ["excellent", "inaccuracy", "mistake", "blunder"] {
             let filter = app.buttons["game.quality.\(name)"]
-            for _ in 0..<5 where !filter.isHittable { app.scrollViews["game.scroll"].swipeUp() }
+            for _ in 0..<5 where !filter.isHittable || filter.frame.maxY > app.tabBars.firstMatch.frame.minY - 12 { app.scrollViews["game.scroll"].swipeUp() }
             XCTAssertTrue(filter.isEnabled)
             XCTAssertLessThanOrEqual(filter.frame.maxX, app.frame.maxX)
             XCTAssertGreaterThanOrEqual(filter.frame.minX, app.frame.minX)
@@ -814,15 +814,62 @@ final class ChessMeUITests: XCTestCase {
         XCTAssertFalse(app.buttons["game.deepReview"].exists)
     }
 
-    private func launchReviewedGameFixture(cached: Bool) throws {
+    func testSavedOpeningMistakesBecomeBookMovesWithoutAnotherReview() throws {
+        try launchReviewedGameFixture(cached: true, opening: true)
+        app.tabBars.buttons["Games"].tap()
+        app.buttons["game.open.reviewed-game"].tap()
+        let opening = app.staticTexts["game.openingName"]
+        XCTAssertTrue(opening.waitForExistence(timeout: 10))
+        XCTAssertTrue(opening.label.contains("Ruy Lopez"))
+        XCTAssertEqual(app.staticTexts["game.bookSummary"].label, "C78 · 9 book moves")
+        XCTAssertFalse(app.buttons["game.deepReview"].exists)
+        XCTAssertFalse(app.buttons["game.nextMoment"].exists)
+        capture("Saved review recognizes the Ruy Lopez opening")
+        app.buttons["game.explore"].tap()
+        let first = app.buttons["game.move.1"]
+        for _ in 0..<6 where !first.isHittable { app.scrollViews["game.scroll"].swipeUp() }
+        XCTAssertTrue(first.label.contains("Book move"))
+        first.tap()
+        let grade = app.descendants(matching: .any)["game.moveQuality"]
+        for _ in 0..<4 where !grade.isHittable { app.scrollViews["game.scroll"].swipeUp() }
+        XCTAssertTrue(grade.exists && grade.label == "Book", app.debugDescription)
+        for quality in ["excellent", "inaccuracy", "mistake", "blunder"] {
+            let filter = app.buttons["game.quality.\(quality)"]
+            XCTAssertTrue(filter.exists)
+            XCTAssertFalse(filter.isEnabled)
+        }
+        capture("Book moves keep their evaluation graph without false mistake counts")
+        let pawn = app.buttons["board.square.c7"]
+        for _ in 0..<6 where !pawn.isHittable { app.scrollViews["game.scroll"].swipeDown() }
+        pawn.tap()
+        app.buttons["board.square.c5"].tap()
+        let currentOpening = app.staticTexts["game.currentOpening"]
+        for _ in 0..<6 where !currentOpening.isHittable { app.scrollViews["game.scroll"].swipeUp() }
+        XCTAssertEqual(currentOpening.label, "Sicilian Defense")
+        XCTAssertEqual(grade.label, "Book")
+        XCTAssertEqual(app.staticTexts["game.variation"].label, "c5")
+        XCTAssertTrue(app.buttons["game.move.2"].label.contains("e5"), "Trying another opening preserves the imported mainline")
+        capture("Explored Sicilian variation is recognized as opening theory")
+        app.buttons["game.return"].tap()
+        XCTAssertFalse(app.staticTexts["game.variation"].exists)
+    }
+
+    private func launchReviewedGameFixture(cached: Bool, opening: Bool = false) throws {
         app.terminate()
         let now = Date().timeIntervalSinceReferenceDate
         let configurationID = "stockfish-d24-n100000-m32-t15.0-l120-a35-total5000000-threads2"
-        let scores = [100_000, 50, -600, 1_000, -100_000]
+        let scores = opening ? [30, 30, 15, 20, 25] : [100_000, 50, -600, 1_000, -100_000]
         let qualities = ["excellent", "inaccuracy", "mistake", "inaccuracy", "blunder"]
         let played = ["e2e4", "g1f3", "f1b5", "b5a4", "e1g1"]
+        let positions = [
+            "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+            "rnbqkbnr/pppp1ppp/8/4p3/4P3/8/PPPP1PPP/RNBQKBNR w KQkq e6 0 2",
+            "r1bqkbnr/pppp1ppp/2n5/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R w KQkq - 2 3",
+            "r1bqkbnr/1ppp1ppp/p1n5/1B2p3/4P3/5N2/PPPP1PPP/RNBQK2R w KQkq - 0 4",
+            "r1bqkb1r/1ppp1ppp/p1n2n2/4p3/B3P3/5N2/PPPP1PPP/RNBQK2R w KQkq - 2 5"
+        ]
         let assessments: [[String: Any]] = (0..<5).map { index in
-            ["ply": index * 2, "positionFEN": "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+            ["ply": index * 2, "positionFEN": opening ? positions[index] : positions[index].replacingOccurrences(of: "pppppppp", with: "ppppppp1").replacingOccurrences(of: "pppp1ppp", with: "pppp1pp1").replacingOccurrences(of: "1ppp1ppp", with: "1ppp1pp1"),
              "playedMove": played[index], "bestMove": played[index], "quality": qualities[index],
              "centipawnLoss": 100, "whiteScore": scores[index], "completedDepth": 24, "isProvisional": true]
         }
@@ -834,11 +881,13 @@ final class ChessMeUITests: XCTestCase {
             "message": "Waiting for tonight and charging",
             "configuration": ["engine": "stockfish", "depth": 24, "nodesPerCandidate": 100_000, "memoryMB": 32,
                               "secondsPerPosition": 15, "topMoves": 2, "searchNodeLimit": 5_000_000, "engineThreads": 2]]
-        let fixture: [String: Any] = [
-            "games": [["id": "reviewed-game", "username": "You", "white": "You", "black": "Practice partner",
+        var game: [String: Any] = ["id": "reviewed-game", "username": "You", "white": "You", "black": "Practice partner",
                        "playedAt": now - 60, "playerSide": "white", "moves": "e4 e5 Nf3 Nc6 Bb5 a6 Ba4 Nf6 O-O", "status": "resign",
                        "clockData": ["initialSeconds": 300, "incrementSeconds": 3, "source": "lichess",
-                                     "remainingCentiseconds": [30_000, 30_000, 29_000, 29_500, 28_500, 29_000, 28_000, 27_500, 26_000]]]],
+                                     "remainingCentiseconds": [30_000, 30_000, 29_000, 29_500, 28_500, 29_000, 28_000, 27_500, 26_000]]]
+        if !opening { game["initialFEN"] = positions[0].replacingOccurrences(of: "pppppppp", with: "ppppppp1") }
+        let fixture: [String: Any] = [
+            "games": [game],
             "analyses": cached ? [] : [review], "localAnalysisJobs": [job], "practice": [], "isDemo": true, "skippedGames": 0]
         app.launchArguments = ["--ui-testing", "--reset-engine", "--reset-evaluation", "--reset-local-analysis"]
         app.launchEnvironment["CHESSME_UI_TEST_LIBRARY"] = String(decoding: try JSONSerialization.data(withJSONObject: fixture), as: UTF8.self)

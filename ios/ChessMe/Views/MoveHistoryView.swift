@@ -7,6 +7,7 @@ struct MoveHistoryView: View {
     var prefix = "history"
     var title: String? = "Move history"
     var showsNavigation = true
+    var bookPlies: Set<Int> = []
     let onSelect: (Int) -> Void
 
     var body: some View {
@@ -28,11 +29,15 @@ struct MoveHistoryView: View {
                     LazyHStack(spacing: 6) {
                         ForEach(history.positions.indices, id: \.self) { index in
                             Button { onSelect(index) } label: {
-                                Text(history.notation(at: index)).font(.caption.monospacedDigit())
+                                HStack(spacing: 4) {
+                                    if bookPlies.contains(index - 1) { Image(systemName: "book.closed.fill").font(.caption2) }
+                                    Text(history.notation(at: index)).font(.caption.monospacedDigit())
+                                }
                                     .padding(.horizontal, 10).padding(.vertical, 9)
                                     .background(selectedIndex == index ? ChessMeStyle.gold.opacity(0.3) : ChessMeStyle.green.opacity(0.06), in: RoundedRectangle(cornerRadius: 8))
                             }
                             .id(index).accessibilityIdentifier("\(prefix).move.\(index)")
+                            .accessibilityLabel(history.notation(at: index) + (bookPlies.contains(index - 1) ? ", Book move" : ""))
                             .accessibilityValue(selectedIndex == index ? "Current position" : "")
                         }
                     }

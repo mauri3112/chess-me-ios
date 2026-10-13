@@ -15,6 +15,7 @@ struct AnalysisInfoView: View {
                 Text("Cloud Stockfish runs on a separately configured server. Cloud reviews require a verified subscription and remaining allowance. Live board analysis always uses your selected device engine.")
             }
             Section("Related puzzles and openings") {
+                Text("Book moves follow the offline Lichess catalogue of \(OpeningBook.shared.openingCount.formatted()) opening lines and variations. Theory ends at the recorded length of each line. Known positions also recognize transpositions. Book moves do not count as engine mistakes; verified forced-mate errors remain visible.")
                 Text("Lichess puzzles come from its CC0 database. Matching uses estimated tactical themes, your puzzle level and failed attempts. Solve the whole line; asking for help keeps the attempt guided.")
                 Text("Opening advice starts after 30 sufficiently reviewed standard games. It requires repeated losses at the same position and agreement on a suggested move. These are engine estimates.")
             }
@@ -43,6 +44,11 @@ struct OpenSourceLicensesView: View {
                 Text("Engine and neural network by Jon Dart.").font(.subheadline)
                 Link("Arasan source", destination: URL(string: "https://github.com/jdart1/arasan-chess/tree/v26.0")!)
                 Text(ArasanEngine.license).font(.system(.footnote, design: .monospaced)).textSelection(.enabled)
+                Text("Lichess openings").font(ChessMeStyle.title(26))
+                Text("The complete opening-name catalogue and its variations are released under Creative Commons CC0. The offline index includes all five ECO volumes.").font(.subheadline)
+                Link("Lichess opening catalogue", destination: URL(string: "https://github.com/lichess-org/chess-openings")!)
+                Text((try? OpeningBook.licenseText()) ?? "Creative Commons CC0 1.0 Universal")
+                    .font(.system(.footnote, design: .monospaced)).textSelection(.enabled)
                 Text("Lichess puzzles").font(ChessMeStyle.title(26))
                 Text("Puzzle data is released under Creative Commons CC0. The original puzzle and database links remain available in the app.").font(.subheadline)
                 Link("Lichess open database", destination: URL(string: "https://database.lichess.org/#puzzles")!)

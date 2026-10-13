@@ -69,12 +69,13 @@ public struct DeviceEngineConfiguration: Codable, Equatable, Sendable {
 }
 
 public enum MoveQuality: String, Codable, CaseIterable, Sendable {
-    case brilliant, best, excellent, good, inaccuracy, mistake, blunder, unclassified
+    case book, brilliant, best, excellent, good, inaccuracy, mistake, blunder, unclassified
     public var title: String {
         self == .brilliant ? "Brilliant candidate" : (self == .unclassified ? "Not assessed" : rawValue.capitalized)
     }
     public var symbol: String {
         switch self {
+        case .book: return "book.closed.fill"
         case .brilliant: return "sparkles"
         case .best: return "star.fill"
         case .excellent: return "checkmark.seal.fill"
@@ -109,11 +110,16 @@ public struct MoveAssessment: Codable, Identifiable, Equatable, Sendable {
     public let whiteScore: Int
     public let completedDepth: Int
     public let isProvisional: Bool
+    public let opening: OpeningVariation?
+    /// The original engine grade is retained when opening theory supplies the displayed label.
+    public let engineQuality: MoveQuality?
     public init(ply: Int, positionFEN: String, playedMove: String, bestMove: String,
-                quality: MoveQuality, centipawnLoss: Int, whiteScore: Int, completedDepth: Int, isProvisional: Bool) {
+                quality: MoveQuality, centipawnLoss: Int, whiteScore: Int, completedDepth: Int, isProvisional: Bool,
+                opening: OpeningVariation? = nil, engineQuality: MoveQuality? = nil) {
         self.ply = ply; self.positionFEN = positionFEN; self.playedMove = playedMove; self.bestMove = bestMove
         self.quality = quality; self.centipawnLoss = centipawnLoss; self.whiteScore = whiteScore
         self.completedDepth = completedDepth; self.isProvisional = isProvisional
+        self.opening = opening; self.engineQuality = engineQuality
     }
 }
 

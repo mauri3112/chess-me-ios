@@ -10,11 +10,11 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 INCLUDE = [
     "Package.swift", "CLIENT-LICENSE.md", "Sources/ChessMeCore",
-    "Tests/ChessMeCoreTests", "Vendor/Stockfish", "Vendor/Arasan",
+    "Tests/ChessMeCoreTests", "Vendor/Stockfish", "Vendor/Arasan", "Vendor/LichessOpenings",
     "ios/LICENSE", "ios/ChessMe", "ios/ChessMeTests", "ios/ChessMeUITests",
     "ios/ChessMe.xcodeproj/project.pbxproj", "ios/ChessMe.xcodeproj/xcshareddata",
-    "ios/Configuration", "docs/design", "scripts/check-core.sh",
-    "scripts/check-ios.sh", "scripts/typecheck-ios.sh", "scripts/export-ios-source.py",
+    "ios/Configuration", "docs/design", "docs/opening-book.md", "scripts/check-core.sh",
+    "scripts/check-ios.sh", "scripts/typecheck-ios.sh", "scripts/export-ios-source.py", "scripts/generate-opening-book.py",
 ]
 FORBIDDEN_PARTS = {".git", ".build", ".tools", "xcuserdata", "private", "secrets", "__pycache__"}
 FORBIDDEN_SUFFIXES = {".p8", ".ipa", ".xcuserstate", ".sqlite", ".sqlite3", ".pyc"}
@@ -85,6 +85,15 @@ Vendor/Stockfish. Exact NNUE networks and licence resources are included in
 Sources/ChessMeCore/Resources. Stockfish's network checksum and pinned upstream
 commit are in Vendor/Stockfish/provenance.json. Arasan 26 remains an alternative.
 Asset-generation sources are included under docs/design.
+
+The full CC0 Lichess opening catalogue is pinned in Vendor/LichessOpenings.
+Its offline position/move index is Sources/ChessMeCore/Resources/OpeningBook.json.
+To reproduce the index, run `uv run --with python-chess python
+scripts/generate-opening-book.py` (one command on one line). Source checksums
+are verified before generation. Book labels preserve engine scores and exclude
+opening theory from mistake cards, counts and recommendations. Verified mate
+errors in named traps remain visible. Recognition follows each recorded line's
+length and supports transpositions without restarting theory after repetitions.
 
 Settings > On-device analysis offers depth targets 24, 28 and 32 on supported
 iPhones and iPads, including the base iPhone 15. Memory use adapts to app

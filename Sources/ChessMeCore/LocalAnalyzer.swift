@@ -182,8 +182,10 @@ public struct LocalAnalyzer: Sendable {
             analyzed += 1
             progress(analyzed, decisions.count)
         }
-        return GameAnalysis(gameID: game.id, findings: findings, analyzedPlies: analyzed, totalPlies: decisions.count,
-                            engineVersion: engineVersion, configurationID: options.configurationID, moveAssessments: assessments)
+        let analysis = GameAnalysis(gameID: game.id, findings: findings, analyzedPlies: analyzed, totalPlies: decisions.count,
+                                    engineVersion: engineVersion, configurationID: options.configurationID, moveAssessments: assessments)
+        let opening = OpeningBook.shared.line(positions: replay.map { $0.0 } + [position], moves: replay.map { $0.1 })
+        return opening.annotating(analysis)
     }
 
     private func finding(game: ChessGame, ply: Int, position: ChessPosition,
