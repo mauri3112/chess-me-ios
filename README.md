@@ -1,6 +1,6 @@
 # ChessMe iOS source
 
-Corresponding client source for ChessMe 0.2.0 build 21, tag `ios-0.2.0-build21`.
+Corresponding client source for ChessMe 0.2.0 build 22, tag `ios-0.2.0-build22`.
 The original iOS app and shared core use GNU GPL version 3 only. See LICENSE and
 CLIENT-LICENSE.md. Third-party notices and compatible licences remain intact.
 The cloud backend is separately operated and is not included here.
@@ -50,6 +50,9 @@ Games > Add for analysis lets users choose night or immediate device analysis,
 select individual games and save the selection. Explicit night selections remain
 queued when automatic overnight queuing is disabled. Row icons distinguish
 unreviewed games, night jobs, waiting jobs, active progress and completed reviews.
+Today lists active and queued games with individual progress and links to their
+reviews. Longer queues expand to every game. Games can be filtered by Saved and
+Reviewed together; partial reviews remain outside the Reviewed filter.
 Recorded results determine win/loss colors; engine evaluations never infer a
 winner. Practice browsing and trial branches keep the original game intact.
 

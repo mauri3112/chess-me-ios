@@ -207,6 +207,24 @@ final class AppModel: ObservableObject {
         return (library.localAnalysisJobs ?? []).filter { $0.gameID == gameID }
             .compactMap(\.checkpoint).sorted { $0.completedAt > $1.completedAt }.first
     }
+    var queuedAnalysisGames: [ChessGame] {
+        let entries = library.games.compactMap { game -> (game: ChessGame, priority: Int, queuedAt: Date)? in
+            guard game.isFinished else { return nil }
+            if let job = localAnalysisJob(for: game.id, includingOrdinary: true), job.isPending {
+                let priority = job.state == .running ? 0 : job.nightOnly ? 3 : job.level != nil ? 1 : 2
+                return (game, priority, job.createdAt)
+            }
+            if let cloud = currentCloudReviews.first(where: { $0.gameID == game.id && $0.isPending }) {
+                return (game, cloud.state == "running" ? 0 : 2, cloud.deadlineAt)
+            }
+            return nil
+        }
+        return entries.sorted {
+            if $0.priority != $1.priority { return $0.priority < $1.priority }
+            if $0.queuedAt != $1.queuedAt { return $0.queuedAt < $1.queuedAt }
+            return $0.game.id < $1.game.id
+        }.map(\.game)
+    }
     func deviceReviewAction(for gameID: String) -> String? {
         let review = gameAnalysis(for: gameID)
         if let job = localAnalysisJob(for: gameID) {

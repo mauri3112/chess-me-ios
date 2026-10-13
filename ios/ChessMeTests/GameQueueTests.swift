@@ -13,6 +13,29 @@ final class GameQueueTests: XCTestCase {
         else { UserDefaults.standard.removeObject(forKey: "analysis.overnight.settings") }
     }
     @MainActor
+    func testTodayQueueOrdersActiveWorkAndDeduplicatesGames() {
+        let now = Date()
+        let games = (0..<6).map { index in
+            ChessGame(id: "queue-\(index)", username: "Learner", white: "Learner", black: "Partner \(index)",
+                      playedAt: now.addingTimeInterval(-60), playerSide: .white, moves: "e4 e5", status: "resign")
+        }
+        let configuration = DeviceEngineConfiguration()
+        var jobs = games.enumerated().map { index, game in
+            LocalAnalysisJob(gameID: game.id, configuration: configuration, level: index == 2 ? nil : .balanced,
+                             nightOnly: index == 3, createdAt: now.addingTimeInterval(Double(index)))
+        }
+        jobs[0].state = .running
+        jobs[4].state = .completed
+        jobs[4].checkpoint = GameAnalysis(gameID: games[4].id, findings: [], analyzedPlies: 1, totalPlies: 1)
+        jobs[5].state = .paused
+        jobs.append(LocalAnalysisJob(gameID: games[0].id, configuration: configuration, nightOnly: true))
+        jobs.append(LocalAnalysisJob(gameID: "missing-game", configuration: configuration))
+        let model = AppModel(previewLibrary: LibrarySnapshot(games: games, isDemo: true, localAnalysisJobs: jobs))
+        XCTAssertEqual(model.queuedAnalysisGames.map(\.id), ["queue-0", "queue-1", "queue-2", "queue-3"])
+        model.updateLibrary { $0.localAnalysisJobs?[0].state = .completed; $0.localAnalysisJobs?.removeLast(2) }
+        XCTAssertEqual(model.queuedAnalysisGames.map(\.id), ["queue-1", "queue-2", "queue-3"])
+    }
+    @MainActor
     func testSelectedNightGamesAreSavedWithoutEnablingAutomaticQueueing() throws {
         let games = DemoContent.games()
         let model = AppModel(previewLibrary: LibrarySnapshot(games: games, isDemo: true))

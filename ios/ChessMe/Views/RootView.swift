@@ -51,7 +51,7 @@ struct RootView: View {
             guard launching else { return }
             let quiet = reduceMotion || ProcessInfo.processInfo.arguments.contains("--reduce-motion")
             do {
-                try await Task.sleep(for: .milliseconds(quiet ? 80 : 350))
+                try await Task.sleep(for: .milliseconds(quiet ? 80 : 1_350))
                 withAnimation(quiet ? .easeOut(duration: 0.18) : .smooth(duration: 0.95)) { launchDocked = true }
                 try await Task.sleep(for: .milliseconds(quiet ? 200 : 980))
                 launching = false
@@ -117,10 +117,14 @@ struct SampleNotice: View {
 
 struct ReviewProgressView: View {
     var showsBulkReviewAction = true
+    var showsGameQueue = false
     @EnvironmentObject private var model: AppModel
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            if model.isAnalyzing || model.isImporting || model.isSyncing {
+            if showsGameQueue && !model.queuedAnalysisGames.isEmpty {
+                TodayAnalysisQueueView(games: model.queuedAnalysisGames)
+            }
+            if model.isImporting || model.isSyncing || (model.isAnalyzing && !showsGameQueue) {
                 HStack {
                     Text(model.progressMessage.isEmpty ? "Updating your games…" : model.progressMessage).font(.caption)
                     Spacer()
@@ -130,7 +134,7 @@ struct ReviewProgressView: View {
                 }
                 if model.isAnalyzing { ProgressView(value: model.progress).tint(ChessMeStyle.green) }
                 else { ProgressView() }
-            } else if showsBulkReviewAction && model.pendingGames > 0 {
+            } else if showsBulkReviewAction && !model.isAnalyzing && model.pendingGames > 0 && (!showsGameQueue || model.queuedAnalysisGames.isEmpty) {
                 Button("Review \(model.pendingGames) remaining games") { model.analyzePending() }
                     .font(.subheadline.weight(.semibold)).accessibilityIdentifier("review.resume")
             }
@@ -139,6 +143,51 @@ struct ReviewProgressView: View {
             }
             if let coverage = model.library.coverageNote { Text(coverage).font(.caption).foregroundStyle(ChessMeStyle.muted) }
         }
+    }
+}
+
+private struct TodayAnalysisQueueView: View {
+    let games: [ChessGame]
+    @EnvironmentObject private var model: AppModel
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack {
+                Text("Analysis queue").font(.subheadline.weight(.semibold))
+                Spacer()
+                if model.isAnalyzing {
+                    Button("Pause") { model.pauseAnalysis() }
+                        .font(.caption.weight(.semibold)).accessibilityIdentifier("review.pause")
+                }
+            }
+            ForEach(Array(games.prefix(3))) { game in queueRow(game) }
+            if games.count > 3 {
+                DisclosureGroup("\(games.count - 3) more queued games") {
+                    VStack(spacing: 14) {
+                        ForEach(Array(games.dropFirst(3))) { game in queueRow(game) }
+                    }.padding(.top, 10)
+                }.font(.subheadline).accessibilityIdentifier("today.analysisMore")
+            }
+        }.accessibilityElement(children: .contain).accessibilityIdentifier("today.analysisQueue")
+    }
+    private func queueRow(_ game: ChessGame) -> some View {
+        NavigationLink { GameDetailView(game: game) } label: {
+            HStack(spacing: 12) {
+                GameAnalysisIndicator(game: game)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(game.reviewLabel).font(.subheadline.weight(.medium)).lineLimit(1)
+                    Text(status(for: game)).font(.caption).foregroundStyle(ChessMeStyle.muted)
+                }
+                Spacer(minLength: 0)
+                Image(systemName: "chevron.right").font(.caption).foregroundStyle(ChessMeStyle.muted)
+            }.foregroundStyle(ChessMeStyle.ink).padding(.vertical, 3)
+        }.accessibilityIdentifier("today.analysis.open.\(game.id)")
+    }
+    private func status(for game: ChessGame) -> String {
+        if let job = model.localAnalysisJob(for: game.id, includingOrdinary: true), job.isPending {
+            if job.state == .running { return "Analyzing on this device" }
+            return job.nightOnly ? "Tonight on this device" : "Queued on this device"
+        }
+        return model.cloudReview(for: game.id)?.state == "running" ? "Analyzing in the cloud" : "Queued in the cloud"
     }
 }
 
@@ -165,7 +214,7 @@ struct ReviewView: View {
                         Spacer()
                         Button("View games") { model.selectedTab = AppTab.games.rawValue }.font(.subheadline.weight(.medium))
                     }.accessibilityIdentifier("home.summary")
-                    ReviewProgressView()
+                    ReviewProgressView(showsGameQueue: true)
                     if model.currentCloudReviews.contains(where: \.isPending) {
                         Button { model.showCloudSetup = true } label: { Label("Cloud reviews in progress", systemImage: "cloud") }
                             .accessibilityIdentifier("cloud.open")
@@ -256,6 +305,7 @@ struct SyncGamesButton: View {
 }
 
 struct ReviewPeriodMenu: View {
+    var compact = false
     @EnvironmentObject private var model: AppModel
     @EnvironmentObject private var subscriptions: SubscriptionStore
     var body: some View {
@@ -266,9 +316,18 @@ struct ReviewPeriodMenu: View {
                 }.accessibilityIdentifier("window.\(window.accessibilityKey)")
             }
         } label: {
-            Label(model.selectedWindow == .day ? "Last 24 hours" : "Last \(model.selectedWindow.shortLabel)", systemImage: "calendar")
-                .font(.subheadline).padding(.horizontal, 14).frame(minHeight: 44)
+            Group {
+                if compact {
+                    HStack(spacing: 6) {
+                        Text(model.selectedWindow.shortTitle).lineLimit(1)
+                        Image(systemName: "chevron.down").font(.caption2)
+                    }.padding(.horizontal, 10)
+                } else {
+                    Label(model.selectedWindow.title, systemImage: "calendar").padding(.horizontal, 14)
+                }
+            }.font(.subheadline).frame(minHeight: 44)
                 .background(ChessMeStyle.ink.opacity(0.05), in: Capsule())
         }.disabled(model.isImporting || model.isSyncing).accessibilityIdentifier("games.period")
+            .accessibilityLabel(model.selectedWindow.title)
     }
 }

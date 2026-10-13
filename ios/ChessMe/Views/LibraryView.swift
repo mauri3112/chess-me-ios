@@ -4,10 +4,15 @@ import ChessMeCore
 struct LibraryView: View {
     @EnvironmentObject private var model: AppModel
     @State private var savedOnly = false
+    @State private var reviewedOnly = false
     @State private var showAnalysisChoices = false
     @State private var schedule: DeviceAnalysisSchedule?
-    @ScaledMetric(relativeTo: .subheadline) private var periodWidth: CGFloat = 148
-    private var games: [ChessGame] { savedOnly ? model.favoriteGames : model.windowGames }
+    @ScaledMetric(relativeTo: .subheadline) private var periodWidth: CGFloat = 110
+    @ScaledMetric(relativeTo: .subheadline) private var filterHeight: CGFloat = 44
+    private var games: [ChessGame] {
+        let candidates = savedOnly ? model.favoriteGames : model.windowGames
+        return reviewedOnly ? candidates.filter { model.gameAnalysis(for: $0.id)?.isComplete == true } : candidates
+    }
     @Environment(\.chessReduceMotion) private var reduceMotion
     var body: some View {
         ScrollView {
@@ -22,23 +27,34 @@ struct LibraryView: View {
                     Spacer()
                     SyncGamesButton(iconOnly: true)
                 }
-                HStack(spacing: 0) {
-                    ReviewPeriodMenu().frame(width: savedOnly ? 0 : periodWidth, alignment: .leading)
-                        .clipped().opacity(savedOnly ? 0 : 1).disabled(savedOnly).accessibilityHidden(savedOnly)
-                    Button { withAnimation(reduceMotion ? nil : .spring(duration: 0.45, bounce: 0.08)) { savedOnly.toggle() } } label: {
-                        Label("Saved", systemImage: "heart.fill")
-                            .font(.subheadline).padding(.horizontal, 14).frame(minHeight: 44)
-                            .foregroundStyle(savedOnly ? .white : ChessMeStyle.ink)
-                            .background(savedOnly ? ChessMeStyle.green : ChessMeStyle.ink.opacity(0.05), in: Capsule())
-                    }.buttonStyle(.plain).padding(.leading, savedOnly ? 0 : 12).transition(.identity)
-                        .accessibilityIdentifier("games.saved")
-                        .accessibilityValue(savedOnly ? "Selected" : "Not selected")
-                    Spacer()
-                }
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 0) {
+                        ReviewPeriodMenu(compact: true)
+                            .frame(width: periodWidth, height: filterHeight, alignment: .leading)
+                            .frame(width: savedOnly ? 0 : periodWidth, height: filterHeight, alignment: .leading)
+                            .clipped().opacity(savedOnly ? 0 : 1).disabled(savedOnly).accessibilityHidden(savedOnly)
+                        Button { withAnimation(reduceMotion ? nil : .spring(duration: 0.45, bounce: 0.08)) { savedOnly.toggle() } } label: {
+                            Label("Saved", systemImage: "heart.fill")
+                                .font(.subheadline).fixedSize().padding(.horizontal, 10).frame(height: filterHeight)
+                                .foregroundStyle(savedOnly ? .white : ChessMeStyle.ink)
+                                .background(savedOnly ? ChessMeStyle.green : ChessMeStyle.ink.opacity(0.05), in: Capsule())
+                        }.buttonStyle(.plain).padding(.leading, savedOnly ? 0 : 8).transition(.identity)
+                            .accessibilityIdentifier("games.saved")
+                            .accessibilityValue(savedOnly ? "Selected" : "Not selected")
+                        Button { reviewedOnly.toggle() } label: {
+                            Label("Reviewed", systemImage: "checkmark.circle.fill")
+                                .font(.subheadline).fixedSize().padding(.horizontal, 10).frame(height: filterHeight)
+                                .foregroundStyle(reviewedOnly ? .white : ChessMeStyle.ink)
+                                .background(reviewedOnly ? ChessMeStyle.green : ChessMeStyle.ink.opacity(0.05), in: Capsule())
+                        }.buttonStyle(.plain).padding(.leading, 8)
+                            .accessibilityIdentifier("games.reviewed")
+                            .accessibilityValue(reviewedOnly ? "Selected" : "Not selected")
+                    }
+                }.frame(height: filterHeight)
                 if games.isEmpty {
-                    Text(savedOnly ? "Save a game using the heart in its review." : "Your completed games will appear here after import.")
+                    Text(reviewedOnly ? (savedOnly ? "No saved games have a completed review yet." : "No games have a completed review in this period yet.") : savedOnly ? "Save a game using the heart in its review." : "Your completed games will appear here after import.")
                         .font(.subheadline).foregroundStyle(ChessMeStyle.muted)
-                    if !savedOnly {
+                    if !savedOnly && !reviewedOnly {
                         PrimaryButton(title: "Import games", symbol: "arrow.down") { model.showConnection = true }
                     }
                 }

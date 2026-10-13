@@ -969,6 +969,8 @@ final class ChessMeUITests: XCTestCase {
         XCTAssertEqual(app.staticTexts["app.title"].label, "Games")
         let saved = app.buttons["games.saved"]
         let original = saved.frame.minX
+        let originalY = saved.frame.minY
+        let originalGap = originalY - app.buttons["games.addAnalysis"].frame.maxY
         saved.tap()
         XCTAssertEqual(saved.value as? String, "Selected")
         XCTAssertLessThan(saved.frame.minX, original - 70)
@@ -976,24 +978,78 @@ final class ChessMeUITests: XCTestCase {
         XCTAssertTrue(app.buttons["game.open.demo-queue-a"].exists)
         let filtered = expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: app.buttons["game.open.demo-queue-b"])
         wait(for: [filtered], timeout: 5)
+        XCTAssertEqual(saved.frame.minY, originalY, accuracy: 2)
+        XCTAssertEqual(saved.frame.minY - app.buttons["games.addAnalysis"].frame.maxY, originalGap, accuracy: 2)
+        XCTAssertLessThan(originalGap, 40)
+        XCTAssertTrue(app.buttons["games.reviewed"].isHittable)
         capture("Saved games control moves with its heart to the left")
         saved.tap()
         XCTAssertEqual(saved.value as? String, "Not selected")
         let returned = expectation(for: NSPredicate { _, _ in abs(saved.frame.minX - original) < 2 }, evaluatedWith: saved)
         wait(for: [returned], timeout: 5)
         XCTAssertTrue(app.buttons["game.open.demo-queue-b"].exists)
+        XCTAssertEqual(saved.frame.minY, originalY, accuracy: 2)
         capture("Saved games control returns to the right")
         app.tabBars.buttons["Practice"].tap()
         XCTAssertEqual(app.staticTexts["app.title"].label, "Practice")
         XCTAssertFalse(app.staticTexts["chess-me"].exists)
     }
 
-    private func launchQueueFixture() throws {
+    func testReviewedFilterCombinesWithSavedAndKeepsPartialReviewsOut() throws {
+        try launchQueueFixture(cachedReview: true)
+        app.tabBars.buttons["Games"].tap()
+        let reviewed = app.buttons["games.reviewed"]
+        XCTAssertTrue(reviewed.isHittable)
+        reviewed.tap()
+        XCTAssertEqual(reviewed.value as? String, "Selected")
+        XCTAssertTrue(app.buttons["game.open.demo-queue-c"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.buttons["game.open.demo-queue-a"].exists, "A partial review is still pending")
+        XCTAssertFalse(app.buttons["game.open.demo-queue-b"].exists)
+        capture("Reviewed filter shows complete cached reviews")
+        app.buttons["games.saved"].tap()
+        XCTAssertTrue(app.buttons["game.open.demo-queue-c"].exists)
+        XCTAssertFalse(app.buttons["game.open.demo-queue-a"].exists)
+        reviewed.tap()
+        XCTAssertTrue(app.buttons["game.open.demo-queue-a"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["game.open.demo-queue-c"].exists)
+        app.buttons["games.saved"].tap()
+        XCTAssertTrue(app.buttons["game.open.demo-queue-b"].waitForExistence(timeout: 5))
+        capture("Saved and Reviewed filters can be combined and cleared")
+    }
+
+    func testTodayShowsPerGameProgressAndOpensTheRunningAndNightGames() throws {
+        try launchQueueFixture(pendingJobs: true)
+        let scroll = app.scrollViews["main.scroll"]
+        let running = app.descendants(matching: .any).matching(identifier: "today.analysis.open.demo-queue-b").firstMatch
+        for _ in 0..<3 where !running.isHittable { scroll.swipeUp() }
+        XCTAssertTrue(running.isHittable, app.debugDescription)
+        XCTAssertTrue(app.descendants(matching: .any)["library.analysis.demo-queue-b"].label.contains("50 percent"))
+        XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "today.analysis.open.demo-queue-c").firstMatch.exists)
+        XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "today.analysis.open.demo-queue-a").firstMatch.exists)
+        capture("Today shows the running game and individual queued games")
+        running.tap()
+        XCTAssertEqual(app.staticTexts["game.match"].label, "You vs Birch")
+        XCTAssertTrue(app.buttons["game.explore"].exists)
+        app.navigationBars.buttons.firstMatch.tap()
+        let more = app.descendants(matching: .any).matching(identifier: "today.analysisMore").firstMatch
+        for _ in 0..<3 where !more.isHittable { scroll.swipeUp() }
+        XCTAssertTrue(more.isHittable)
+        more.tap()
+        let night = app.descendants(matching: .any).matching(identifier: "today.analysis.open.demo-queue-e").firstMatch
+        for _ in 0..<3 where !night.isHittable { scroll.swipeUp() }
+        XCTAssertTrue(night.isHittable)
+        capture("A longer Today queue expands to every queued game")
+        night.tap()
+        XCTAssertEqual(app.staticTexts["game.match"].label, "You vs Elm")
+    }
+
+    private func launchQueueFixture(cachedReview: Bool = false, pendingJobs: Bool = false) throws {
         app.terminate()
         let now = Date().timeIntervalSinceReferenceDate
-        let ids = ["demo-queue-a", "demo-queue-b", "demo-queue-c"]
-        let results = ["1-0", "0-1", "1/2-1/2"]
-        let games = ["Aster", "Birch", "Cedar"].enumerated().map { index, name -> [String: Any] in
+        let ids = ["demo-queue-a", "demo-queue-b", "demo-queue-c", "demo-queue-d", "demo-queue-e"]
+        let results = ["1-0", "0-1", "1/2-1/2", "1-0", "0-1"]
+        let names = pendingJobs ? ["Aster", "Birch", "Cedar", "Dahlia", "Elm"] : ["Aster", "Birch", "Cedar"]
+        let games = names.enumerated().map { index, name -> [String: Any] in
             let playedAt = now - Double(index + 1) * 60
             return ["id": ids[index], "username": "Learner", "white": "Learner", "black": name,
                     "playedAt": playedAt, "playerSide": "white", "moves": "e4 e5 Nf3 Nc6", "status": "resign",
@@ -1001,8 +1057,33 @@ final class ChessMeUITests: XCTestCase {
         }
         let review: [String: Any] = ["gameID": "demo-queue-c", "findings": [], "analyzedPlies": 2, "totalPlies": 2,
                                      "source": "cloud", "completedAt": now, "engineVersion": "ui-demonstration"]
-        let fixture: [String: Any] = ["games": games, "analyses": [review], "practice": [], "isDemo": true,
+        var fixture: [String: Any] = ["games": games, "analyses": [review], "practice": [], "isDemo": true,
                                      "favoriteGameIDs": ["demo-queue-a"], "skippedGames": 0]
+        let configuration: [String: Any] = ["engine": "stockfish", "depth": 24, "nodesPerCandidate": 100_000,
+            "memoryMB": 32, "secondsPerPosition": 15, "topMoves": 2, "searchNodeLimit": 5_000_000, "engineThreads": 2]
+        if cachedReview {
+            var cached = review
+            cached["source"] = "device"
+            let partial: [String: Any] = ["gameID": ids[0], "findings": [], "analyzedPlies": 1, "totalPlies": 2,
+                                         "source": "device", "completedAt": now, "engineVersion": "ui-demonstration"]
+            let job: [String: Any] = ["id": "cached-complete", "gameID": ids[2], "level": "balanced", "nightOnly": true,
+                "requiresPro": false, "createdAt": now - 60, "state": "completed", "checkpoint": cached, "configuration": configuration]
+            fixture["analyses"] = [partial]
+            fixture["localAnalysisJobs"] = [job]
+            fixture["favoriteGameIDs"] = [ids[0], ids[2]]
+        }
+        if pendingJobs {
+            let jobs = ids.enumerated().map { index, id -> [String: Any] in
+                var job: [String: Any] = ["id": "queue-\(index)", "gameID": id, "level": "balanced", "nightOnly": index != 1 && index != 2,
+                    "requiresPro": true, "createdAt": now + Double(index), "state": index == 1 ? "running" : "queued", "configuration": configuration]
+                if index == 1 {
+                    job["checkpoint"] = ["gameID": id, "findings": [], "analyzedPlies": 1, "totalPlies": 2,
+                        "source": "device", "completedAt": now, "engineVersion": "ui-demonstration"] as [String: Any]
+                }
+                return job
+            }
+            fixture["localAnalysisJobs"] = jobs
+        }
         app.launchArguments = ["--ui-testing", "--reset-engine", "--reset-evaluation", "--reset-local-analysis"]
         app.launchEnvironment["CHESSME_UI_TEST_LIBRARY"] = String(decoding: try JSONSerialization.data(withJSONObject: fixture), as: UTF8.self)
         app.launch()
