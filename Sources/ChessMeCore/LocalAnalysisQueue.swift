@@ -144,7 +144,16 @@ public struct LocalAnalysisJob: Codable, Identifiable, Sendable {
         self.id = id; self.gameID = gameID; self.configuration = configuration; self.level = level
         self.nightOnly = nightOnly; self.requiresPro = requiresPro; self.createdAt = createdAt
     }
-    public var isPending: Bool { state == .queued || state == .running }
+    public var isPending: Bool { (state == .queued || state == .running) && checkpoint?.isComplete != true }
+    public var statusText: String {
+        switch state {
+        case .completed: return "Review ready"
+        case .running: return "Analyzing with \(configuration.engine.title)"
+        case .queued: return message ?? (nightOnly ? "Waiting for tonight and charging" : "Waiting to start")
+        case .paused: return message ?? "Paused. Completed decisions are saved."
+        case .failed: return message ?? "Review could not finish. Try resuming it."
+        }
+    }
     public var progress: Double {
         guard let checkpoint, checkpoint.totalPlies > 0 else { return state == .completed ? 1 : 0 }
         return Double(checkpoint.analyzedPlies) / Double(checkpoint.totalPlies)
@@ -160,6 +169,11 @@ public struct LocalAnalysisJob: Codable, Identifiable, Sendable {
         return ignoringCache == requested
     }
     public mutating func recoverAfterInterruption() {
+        if checkpoint?.isComplete == true {
+            state = .completed
+            message = "Review ready"
+            return
+        }
         guard state == .running else { return }
         state = .queued
         message = "Waiting to resume. Completed decisions are saved."

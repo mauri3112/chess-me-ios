@@ -20,11 +20,12 @@ struct GameDetailView: View {
     @State private var showEngineSettings = false
     @State private var exploring = false
     @State private var momentIndex = 0
+    @State private var highlightedQuality: MoveQuality?
     private var moments: [MoveFinding] {
         (analysis?.findings ?? []).sorted { $0.moveNumber < $1.moveNumber }
     }
     private var moment: MoveFinding? { moments.indices.contains(momentIndex) ? moments[momentIndex] : nil }
-    private var analysis: GameAnalysis? { model.library.analyses.first { $0.gameID == game.id } }
+    private var analysis: GameAnalysis? { model.gameAnalysis(for: game.id) }
     private var savedGame: ChessGame { model.library.games.first { $0.id == game.id } ?? game }
     @State private var showLocalSettings = false
     private var deviceReviewAlreadyActive: Bool {
@@ -48,17 +49,12 @@ struct GameDetailView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
-                HStack {
-                    Eyebrow(text: model.isDemo ? "Sample game" : "Completed game")
-                    Spacer()
-                    FavoriteButton(selected: model.isFavorite(game)) { model.toggleFavorite(game) }
-                }
-                Text(game.label).font(ChessMeStyle.title(26)).foregroundStyle(ChessMeStyle.ink)
-                HStack {
-                    Text(exploring ? "Explore the game" : moments.isEmpty ? "Game replay" : "Moment \(momentIndex + 1) of \(moments.count)")
-                        .font(.subheadline.weight(.medium)).accessibilityIdentifier("game.moment")
-                    Spacer()
-                    Button(exploring ? (moments.isEmpty ? "Back to review" : "Back to moments") : "Explore") {
+                if model.isDemo { Eyebrow(text: "Sample game") }
+                HStack(alignment: .center, spacing: 12) {
+                    Text(game.label).font(ChessMeStyle.title(24)).foregroundStyle(ChessMeStyle.ink)
+                        .lineLimit(2).layoutPriority(1).accessibilityIdentifier("game.match")
+                    Spacer(minLength: 0)
+                    Button(exploring ? "Review" : "Explore") {
                         exploring.toggle()
                         if !exploring { selectMoment(momentIndex) }
                     }.font(.subheadline.weight(.semibold)).frame(minHeight: 44).accessibilityIdentifier("game.explore")
@@ -72,7 +68,7 @@ struct GameDetailView: View {
                 }
                 if let replay {
                     if exploring {
-                        ReviewClocksView(game: savedGame, timeline: clockTimeline, history: replay.moveHistory, index: replay.index,
+                        ReviewClocksView(game: savedGame, timeline: clockTimeline, index: replay.index,
                                          isVariation: replay.isVariation, loading: clocksLoading, error: clockError) { Task { await loadClocks() } }
                     }
                     LiveAnalysis(controller: analyzer, position: replay.position) { evaluation in
@@ -122,8 +118,32 @@ struct GameDetailView: View {
                                 .disabled(replay.index == replay.moves.count).accessibilityLabel("Last position")
                         }
                     }
-                    MoveHistoryView(history: replay.moveHistory, selectedIndex: replay.index, prefix: "game", title: "Imported moves") { index in exploring = true; navigate(index) }
+                    if let analysis {
+                        VStack(alignment: .leading, spacing: 10) {
+                            Text("\(reviewOrigin) review \(analysis.isComplete ? "ready" : "in progress") · \(analysis.analyzedPlies)/\(analysis.totalPlies) decisions")
+                                .font(.caption).foregroundStyle(ChessMeStyle.muted).accessibilityIdentifier("game.reviewStatus")
+                            if let assessments = analysis.moveAssessments, !assessments.isEmpty {
+                                EvaluationTimeline(assessments: assessments, totalPlies: replay.moves.count, selectedPly: replay.index,
+                                                   source: analysis.source, highlightedQuality: highlightedQuality) { index in exploring = true; navigate(index) }
+                                LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 8) {
+                                        ForEach([MoveQuality.excellent, .inaccuracy, .mistake, .blunder], id: \.self) { quality in
+                                            let count = assessments.filter { $0.quality == quality }.count
+                                            Button { highlightedQuality = highlightedQuality == quality ? nil : quality } label: {
+                                                Text("\(quality.title) \(count)").font(.caption.weight(.semibold))
+                                                    .frame(maxWidth: .infinity, minHeight: 44)
+                                                    .foregroundStyle(highlightedQuality == quality ? .white : ChessMeStyle.ink)
+                                                    .background(highlightedQuality == quality ? ChessMeStyle.green : ChessMeStyle.green.opacity(0.08), in: Capsule())
+                                            }.buttonStyle(.plain).disabled(count == 0)
+                                                .accessibilityIdentifier("game.quality.\(quality.rawValue)")
+                                                .accessibilityValue(highlightedQuality == quality ? "Highlighted on graph" : "")
+                                                .accessibilityAddTraits(highlightedQuality == quality ? .isSelected : [])
+                                        }
+                                }
+                            }
+                        }
+                    }
                     if exploring || moments.isEmpty {
+                        MoveHistoryView(history: replay.moveHistory, selectedIndex: replay.index, prefix: "game", title: nil, showsNavigation: false) { index in exploring = true; navigate(index) }
                         if replay.isVariation {
                             Text(replay.variationSAN).font(.subheadline.monospaced()).accessibilityIdentifier("game.variation")
                             Button("Return to game") { navigate(replay.index) }.font(.subheadline.weight(.semibold))
@@ -139,6 +159,10 @@ struct GameDetailView: View {
                 if let replayError { Text(replayError).font(.footnote).foregroundStyle(.red) }
                 if let job = model.localAnalysisJob(for: game.id) {
                     PaperCard {
+                        if analysis?.isComplete == true, job.isPending {
+                            Text("Your saved review is ready. A deeper review is \(job.state == .running ? "running" : "queued").")
+                                .font(.caption).accessibilityIdentifier("game.deeperReviewStatus")
+                        }
                         LocalAnalysisStatusView(job: job, currentDepth: model.deviceAnalysisDepth)
                         if job.state == .running { Button("Pause") { model.pauseAnalysis() } }
                     }
@@ -149,12 +173,14 @@ struct GameDetailView: View {
                     Button("Depth settings") { showLocalSettings = true }.font(.caption)
                         .accessibilityIdentifier("game.localSettings")
                 }
-                PrimaryButton(title: model.localAnalysisJob(for: game.id)?.state == .paused ? "Resume on this device" : "Analyze on this device", symbol: "cpu") {
-                    analyzer.stop()
-                    model.analyzeOnDevice(gameID: game.id)
+                if let action = model.deviceReviewAction(for: game.id) {
+                    PrimaryButton(title: action, symbol: "cpu") {
+                        analyzer.stop()
+                        model.analyzeOnDevice(gameID: game.id)
+                    }
+                    .disabled(model.isImporting || model.cloudIsRunning || !DeviceAnalysisCoordinator.hardware.supportsOvernight || deviceReviewAlreadyActive)
+                    .accessibilityIdentifier("game.deepReview")
                 }
-                .disabled(model.isImporting || model.cloudIsRunning || !DeviceAnalysisCoordinator.hardware.supportsOvernight || deviceReviewAlreadyActive)
-                .accessibilityIdentifier("game.deepReview")
                 if !DeviceAnalysisCoordinator.hardware.supportsOvernight {
                     Text(LocalAnalysisLevel.balanced.requirement).font(.caption)
                     Button("Run an ordinary device review") { analyzer.stop(); model.analyzePending(gameID: game.id) }
@@ -165,21 +191,6 @@ struct GameDetailView: View {
                         .font(.subheadline).accessibilityIdentifier("game.engines")
                 }
                 if let analysis {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("\(reviewOrigin) review · \(analysis.analyzedPlies)/\(analysis.totalPlies) decisions\(analysis.isComplete ? "" : " · partial")")
-                            .font(.caption).foregroundStyle(ChessMeStyle.muted)
-                        if exploring, let assessments = analysis.moveAssessments, !assessments.isEmpty {
-                            EvaluationTimeline(assessments: assessments, totalPlies: replay?.moves.count ?? 1, selectedPly: replay?.index ?? 0, onSelect: navigate)
-                            ScrollView(.horizontal, showsIndicators: false) {
-                                HStack(spacing: 8) {
-                                    ForEach(MoveQuality.allCases.filter { $0 != .unclassified }, id: \.self) { quality in
-                                        let count = assessments.filter { $0.quality == quality }.count
-                                        if count > 0 { Text("\(quality.title) \(count)").font(.caption).padding(8).background(ChessMeStyle.green.opacity(0.07), in: Capsule()) }
-                                    }
-                                }
-                            }
-                        }
-                    }
                     if exploring {
                         ForEach(analysis.findings) { finding in
                             Button { if finding.isPuzzle { model.openLesson(finding) } else { card = finding } } label: {
@@ -222,6 +233,7 @@ struct GameDetailView: View {
         .accessibilityIdentifier("game.scroll")
         .navigationTitle("Game review").navigationBarTitleDisplayMode(.inline)
         .toolbar(.visible, for: .navigationBar)
+        .toolbar { ToolbarItem(placement: .topBarTrailing) { FavoriteButton(selected: model.isFavorite(game)) { model.toggleFavorite(game) } } }
         .task {
             do {
                 let game = savedGame
@@ -237,6 +249,17 @@ struct GameDetailView: View {
             catch { replayError = error.localizedDescription }
         }
         .onChange(of: savedGame.clockData) { _, _ in rebuildClockTimeline() }
+        .onChange(of: analysis) { previous, current in
+            if !exploring, !moments.isEmpty {
+                let earlier = (previous?.findings ?? []).sorted { $0.moveNumber < $1.moveNumber }
+                let selectedID = earlier.indices.contains(momentIndex) ? earlier[momentIndex].id : nil
+                let nextIndex = selectedID.flatMap { id in moments.firstIndex { $0.id == id } } ?? min(momentIndex, moments.count - 1)
+                selectMoment(nextIndex)
+            }
+            if let highlightedQuality, current?.moveAssessments?.contains(where: { $0.quality == highlightedQuality }) != true {
+                self.highlightedQuality = nil
+            }
+        }
         .onChange(of: replay?.position) { _, _ in updateAnalysis() }
         .onChange(of: model.engineConfiguration) { _, _ in updateAnalysis() }
         .onChange(of: model.isAnalyzing) { _, busy in if busy { analyzer.stop() } else { updateAnalysis() } }

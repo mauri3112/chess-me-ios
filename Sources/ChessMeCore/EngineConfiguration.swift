@@ -55,6 +55,17 @@ public struct DeviceEngineConfiguration: Codable, Equatable, Sendable {
                         memoryMegabytes: memoryMB, timeLimitSeconds: Double(secondsPerPosition), engine: engine,
                         searchNodeLimit: searchNodeLimit, engineThreads: engineThreads ?? 1)
     }
+
+    /// Completed work at this search budget can satisfy a smaller request.
+    /// Memory and thread preferences do not require repeating a saved review.
+    public func covers(_ requested: Self) -> Bool {
+        guard engine == requested.engine, depth >= requested.depth,
+              secondsPerPosition >= requested.secondsPerPosition else { return false }
+        if let requestedNodes = requested.searchNodeLimit {
+            guard let searchNodeLimit, searchNodeLimit >= requestedNodes else { return false }
+        } else if nodesPerCandidate < requested.nodesPerCandidate { return false }
+        return true
+    }
 }
 
 public enum MoveQuality: String, Codable, CaseIterable, Sendable {

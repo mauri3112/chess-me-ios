@@ -158,15 +158,32 @@ struct MoveQualityBadge: View {
     }
 }
 
+struct EvaluationTimelineGeometry {
+    let size: CGSize
+    let totalPlies: Int
+    private var inset: CGFloat { min(8, min(size.width, size.height) / 2) }
+    func point(for assessment: MoveAssessment) -> CGPoint {
+        let fraction = min(1, max(0, CGFloat(assessment.ply + 1) / CGFloat(max(1, totalPlies))))
+        return CGPoint(x: inset + fraction * max(0, size.width - 2 * inset),
+                       y: inset + max(0, size.height - 2 * inset) *
+                          (0.5 - CGFloat(min(1_000, max(-1_000, assessment.whiteScore))) / 2_000))
+    }
+    func nearest(to x: CGFloat, assessments: [MoveAssessment]) -> MoveAssessment? {
+        assessments.min { abs(point(for: $0).x - x) < abs(point(for: $1).x - x) }
+    }
+}
+
 struct EvaluationTimeline: View {
     let assessments: [MoveAssessment]
     let totalPlies: Int
     let selectedPly: Int
+    var source = "device"
+    var highlightedQuality: MoveQuality?
     let onSelect: (Int) -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Evaluation · device").font(.caption.weight(.medium)).foregroundStyle(ChessMeStyle.muted)
+            Text("Evaluation · \(source == "cloud" ? "cloud" : "on device")").font(.caption.weight(.medium)).foregroundStyle(ChessMeStyle.muted)
             HStack(spacing: 8) {
             VStack(alignment: .leading) {
                 Text("+10")
@@ -174,55 +191,57 @@ struct EvaluationTimeline: View {
                 Text("0")
                 Spacer()
                 Text("−10")
-            }.font(.caption2.monospacedDigit()).foregroundStyle(ChessMeStyle.muted).frame(height: 70)
+            }.font(.caption2.monospacedDigit()).foregroundStyle(ChessMeStyle.muted).frame(height: 74).padding(.vertical, 8)
             GeometryReader { geometry in
                 Canvas { context, size in
                     let sorted = assessments.sorted { $0.ply < $1.ply }
-                    func point(_ assessment: MoveAssessment) -> CGPoint {
-                        CGPoint(x: CGFloat(assessment.ply + 1) / CGFloat(max(1, totalPlies)) * size.width,
-                                y: size.height * (0.5 - CGFloat(min(1_000, max(-1_000, assessment.whiteScore))) / 2_000))
-                    }
+                    let layout = EvaluationTimelineGeometry(size: size, totalPlies: totalPlies)
                     var zero = Path()
                     zero.move(to: CGPoint(x: 0, y: size.height / 2))
                     zero.addLine(to: CGPoint(x: size.width, y: size.height / 2))
                     context.stroke(zero, with: .color(ChessMeStyle.muted.opacity(0.25)), lineWidth: 1)
                     var line = Path()
                     for (index, assessment) in sorted.enumerated() {
-                        if index == 0 || assessment.ply - sorted[index - 1].ply > 2 { line.move(to: point(assessment)) }
-                        else { line.addLine(to: point(assessment)) }
+                        if index == 0 || assessment.ply - sorted[index - 1].ply > 2 { line.move(to: layout.point(for: assessment)) }
+                        else { line.addLine(to: layout.point(for: assessment)) }
                     }
-                    context.stroke(line, with: .color(ChessMeStyle.green), lineWidth: 2)
+                    context.stroke(line, with: .color(ChessMeStyle.green.opacity(highlightedQuality == nil ? 1 : 0.3)), lineWidth: 2)
                     for assessment in sorted {
-                        let p = point(assessment), radius: CGFloat = assessment.ply + 1 == selectedPly ? 5 : 3
+                        let matches = highlightedQuality == assessment.quality
+                        let p = layout.point(for: assessment), radius: CGFloat = matches || assessment.ply + 1 == selectedPly ? 5 : 3
                         let dot = Path(ellipseIn: CGRect(x: p.x - radius, y: p.y - radius, width: radius * 2, height: radius * 2))
-                        context.fill(dot, with: .color(assessment.quality == .blunder || assessment.quality == .mistake ? .red : ChessMeStyle.green))
+                        let color: Color = assessment.quality == .blunder || assessment.quality == .mistake ? .red : assessment.quality == .inaccuracy ? .orange : ChessMeStyle.green
+                        context.fill(dot, with: .color(color.opacity(highlightedQuality == nil || matches ? 1 : 0.18)))
+                        if matches {
+                            context.stroke(Path(ellipseIn: CGRect(x: p.x - 7, y: p.y - 7, width: 14, height: 14)), with: .color(color), lineWidth: 1)
+                        }
                     }
                 }
                 .contentShape(Rectangle())
                 .onTapGesture { location in
-                    let ply = Int(location.x / max(1, geometry.size.width) * CGFloat(totalPlies))
-                    if let nearest = assessments.min(by: { abs($0.ply + 1 - ply) < abs($1.ply + 1 - ply) }) { onSelect(nearest.ply + 1) }
+                    let candidates = highlightedQuality.map { quality in assessments.filter { $0.quality == quality } } ?? assessments
+                    if let nearest = EvaluationTimelineGeometry(size: geometry.size, totalPlies: totalPlies).nearest(to: location.x, assessments: candidates) { onSelect(nearest.ply + 1) }
                 }
                 .accessibilityHidden(true)
-            }.frame(height: 70)
+            }.frame(height: 90)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel("Evaluation graph")
+                .accessibilityValue(highlightedQuality.map { quality in
+                    let count = assessments.filter { $0.quality == quality }.count
+                    return "\(count) \(quality.title) \(count == 1 ? "move" : "moves") highlighted"
+                } ?? "All reviewed moves")
+                .accessibilityIdentifier("game.evaluationPlot")
+                .accessibilityAdjustableAction { direction in
+                    let candidates = assessments.filter { highlightedQuality == nil || $0.quality == highlightedQuality }.sorted { $0.ply < $1.ply }
+                    let next = direction == .increment ? candidates.first { $0.ply + 1 > selectedPly } : candidates.last { $0.ply + 1 < selectedPly }
+                    if let next { onSelect(next.ply + 1) }
+                }
             }
             HStack {
                 Text("Start")
                 Spacer()
                 Text("\(totalPlies) plies")
             }.font(.caption2).foregroundStyle(ChessMeStyle.muted)
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 6) {
-                    ForEach(assessments) { assessment in
-                        Button { onSelect(assessment.ply + 1) } label: {
-                            Text("\(assessment.ply / 2 + 1)\(assessment.ply % 2 == 0 ? "." : "…")")
-                                .font(.caption.monospacedDigit()).padding(7)
-                                .background(selectedPly == assessment.ply + 1 ? ChessMeStyle.gold.opacity(0.3) : ChessMeStyle.green.opacity(0.05), in: Capsule())
-                        }
-                        .accessibilityLabel("Move \(assessment.ply / 2 + 1), \(assessment.quality.title)")
-                    }
-                }
-            }
-        }.accessibilityIdentifier("game.evaluationTimeline")
+        }.accessibilityElement(children: .contain).accessibilityIdentifier("game.evaluationTimeline")
     }
 }

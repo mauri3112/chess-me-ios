@@ -44,13 +44,13 @@ struct LibraryView: View {
                                 Text(game.playerSide == .white ? game.black : game.white).font(.subheadline.weight(.semibold))
                                 Text(game.playedAt, format: .dateTime.month(.abbreviated).day().hour().minute())
                                     .font(.caption).foregroundStyle(ChessMeStyle.muted)
-                                if let job = model.library.localAnalysisJobs?.last(where: { $0.gameID == game.id && $0.isPending }) {
+                                if let job = model.localAnalysisJob(for: game.id), job.isPending {
                                     Label(job.state == .running ? "Analyzing on device" : (job.nightOnly ? "Queued for tonight" : "Queued on device"), systemImage: job.state == .running ? "cpu" : "clock")
                                         .font(.caption2).foregroundStyle(ChessMeStyle.green)
                                         .symbolEffect(.pulse, isActive: job.state == .running && !reduceMotion)
                                         .accessibilityIdentifier("library.analysis.\(game.id)")
                                 }
-                                if let analysis = model.library.analyses.first(where: { $0.gameID == game.id }) {
+                                if let analysis = model.gameAnalysis(for: game.id) {
                                     Text("\(analysis.findings.count) key moments · \(analysis.source == "cloud" ? "cloud" : "on device")\(analysis.isComplete ? "" : " · incomplete")")
                                         .font(.caption).foregroundStyle(ChessMeStyle.muted)
                                 } else { Text("Ready to review").font(.caption).foregroundStyle(ChessMeStyle.muted) }

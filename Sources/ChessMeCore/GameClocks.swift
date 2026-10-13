@@ -65,6 +65,15 @@ public struct GameClockTimeline: Sendable {
     public let snapshots: [GameClockSnapshot]
     public let moves: [GameMoveTiming]
 
+    /// The most recent move by each player at this imported board position.
+    /// A black-to-move starting FEN must preserve the same clock ownership.
+    public func lastMove(for side: Side, at index: Int) -> GameMoveTiming? {
+        var ply = min(max(0, index), moves.count) - 1
+        guard ply >= 0 else { return nil }
+        if moves[ply].side != side { ply -= 1 }
+        return ply >= 0 ? moves[ply] : nil
+    }
+
     public init(data: GameClockData, positions: [ChessPosition], status: String) {
         guard let first = positions.first else { snapshots = []; moves = []; return }
         let plyCount = positions.count - 1

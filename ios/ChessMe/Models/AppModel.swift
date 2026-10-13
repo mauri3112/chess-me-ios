@@ -153,10 +153,65 @@ final class AppModel: ObservableObject {
         guard !isImporting, !cloudIsRunning, let game = windowGames.first(where: { $0.id == gameID }) else { return }
         guard selectedWindow == .day || subscriptions.isPro else { showPaywall = true; return }
         let level = DeviceAnalysisCoordinator.hardware.bounded(overnightSettings.level)
-        deviceAnalysis.enqueue(games: [game], configuration: deepConfiguration(level), level: level, requiresPro: selectedWindow != .day)
+        if let job = localAnalysisJob(for: gameID), job.state != .completed {
+            deviceAnalysis.enqueue(games: [game], configuration: job.configuration, level: job.level, requiresPro: selectedWindow != .day)
+        } else {
+            deviceAnalysis.enqueue(games: [game], configuration: deepConfiguration(level), level: level, requiresPro: selectedWindow != .day)
+        }
     }
     func localAnalysisJob(for gameID: String) -> LocalAnalysisJob? {
-        (library.localAnalysisJobs ?? []).last { $0.gameID == gameID && $0.level != nil }
+        let jobs = (library.localAnalysisJobs ?? []).filter { $0.gameID == gameID && $0.level != nil }
+        return jobs.last { $0.state == .running }
+            ?? jobs.last { $0.isPending && !$0.nightOnly }
+            ?? jobs.last { $0.isPending }
+            ?? jobs.last { $0.state == .paused || $0.state == .failed }
+            ?? jobs.last { $0.state == .completed }
+    }
+    func completeDeviceReview(for gameID: String, covering configuration: DeviceEngineConfiguration) -> GameAnalysis? {
+        let version = LocalAnalyzer(options: configuration.options).engineVersion
+        let jobs = (library.localAnalysisJobs ?? []).filter {
+            $0.gameID == gameID && $0.configuration.covers(configuration) &&
+            $0.checkpoint?.source == "device" && $0.checkpoint?.gameID == gameID &&
+            $0.checkpoint?.isComplete == true && $0.checkpoint?.engineVersion == version
+        }.sorted {
+            if $0.configuration.depth != $1.configuration.depth { return $0.configuration.depth > $1.configuration.depth }
+            return ($0.checkpoint?.completedAt ?? .distantPast) > ($1.checkpoint?.completedAt ?? .distantPast)
+        }
+        return jobs.first?.checkpoint ?? (library.analyses + (library.analysisHistory ?? [])).first {
+            $0.gameID == gameID && $0.isComplete && $0.source == "device" &&
+            $0.engineVersion == version && $0.configurationID == configuration.options.configurationID
+        }
+    }
+    func gameAnalysis(for gameID: String) -> GameAnalysis? {
+        if let saved = library.analyses.first(where: { $0.gameID == gameID }) { return saved }
+        return (library.localAnalysisJobs ?? []).filter { $0.gameID == gameID }
+            .compactMap(\.checkpoint).sorted { $0.completedAt > $1.completedAt }.first
+    }
+    func deviceReviewAction(for gameID: String) -> String? {
+        let review = gameAnalysis(for: gameID)
+        if let job = localAnalysisJob(for: gameID) {
+            switch job.state {
+            case .running: return nil
+            case .queued: return job.nightOnly ? (review?.isComplete == true ? "Start deeper review now" : "Analyze now on this device") : nil
+            case .paused, .failed: return "Resume on this device"
+            case .completed: break
+            }
+        }
+        let level = DeviceAnalysisCoordinator.hardware.bounded(overnightSettings.level)
+        if completeDeviceReview(for: gameID, covering: deepConfiguration(level)) != nil { return nil }
+        return review?.isComplete == true ? "Analyze deeper on this device" : "Analyze on this device"
+    }
+    func reconcileLocalAnalysisResults() {
+        let saved = Dictionary(library.analyses.map { ($0.gameID, $0) }, uniquingKeysWith: { first, _ in first })
+        for job in library.localAnalysisJobs ?? [] {
+            if let checkpoint = job.checkpoint, checkpoint.gameID == job.gameID, checkpoint.source == "device", checkpoint.isComplete {
+                if let existing = saved[job.gameID], existing.isComplete, existing.completedAt >= checkpoint.completedAt {
+                    completeCoveredJobs(using: checkpoint, configuration: job.configuration)
+                    continue
+                }
+                acceptDeviceCheckpoint(checkpoint)
+            }
+        }
     }
     func deviceAnalysisState(running: Bool, progress: Double, message: String) {
         isAnalyzing = running; self.progress = progress; progressMessage = message
@@ -164,7 +219,26 @@ final class AppModel: ObservableObject {
     func acceptDeviceCheckpoint(_ analysis: GameAnalysis) {
         // Keep a complete cloud/older review visible until its replacement is complete.
         if !analysis.isComplete, library.analyses.contains(where: { $0.gameID == analysis.gameID && $0.isComplete }) { return }
+        if analysis.isComplete, let job = library.localAnalysisJobs?.first(where: { $0.checkpoint == analysis }),
+           let covered = completeDeviceReview(for: analysis.gameID, covering: job.configuration) {
+            saveAnalysis(covered)
+            let configuration = library.localAnalysisJobs?.first(where: { $0.checkpoint == covered && $0.configuration.options.configurationID == covered.configurationID })?.configuration ?? job.configuration
+            completeCoveredJobs(using: covered, configuration: configuration)
+            return
+        }
         saveAnalysis(analysis)
+    }
+    private func completeCoveredJobs(using review: GameAnalysis, configuration: DeviceEngineConfiguration) {
+        guard review.isComplete, review.engineVersion == LocalAnalyzer(options: configuration.options).engineVersion else { return }
+        updateLibrary { snapshot in
+            for index in (snapshot.localAnalysisJobs ?? []).indices {
+                guard let job = snapshot.localAnalysisJobs?[index], job.gameID == review.gameID,
+                      job.state != .completed, configuration.covers(job.configuration) else { continue }
+                snapshot.localAnalysisJobs?[index].checkpoint = review
+                snapshot.localAnalysisJobs?[index].state = .completed
+                snapshot.localAnalysisJobs?[index].message = "Review ready"
+            }
+        }
     }
     var effectiveEngineConfiguration: DeviceEngineConfiguration {
         engineConfiguration.bounded(forMemoryMB: Int(ProcessInfo.processInfo.physicalMemory / 1_048_576), lowPower: ProcessInfo.processInfo.isLowPowerModeEnabled)
@@ -463,6 +537,7 @@ final class AppModel: ObservableObject {
     func endSession() { activeLesson = nil; sessionTab = nil; session = []; sessionIndex = 0; sessionFinished = false; sessionOutcomes = [:] }
 
     private func saveAnalysis(_ analysis: GameAnalysis) {
+        if library.analyses.first(where: { $0.gameID == analysis.gameID }) == analysis { return }
         if let previous = library.analyses.first(where: { $0.gameID == analysis.gameID }),
            previous.source != analysis.source || previous.configurationID != analysis.configurationID || previous.engineVersion != analysis.engineVersion {
             var history = library.analysisHistory ?? []

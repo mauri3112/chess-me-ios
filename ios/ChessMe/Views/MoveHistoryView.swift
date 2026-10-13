@@ -6,17 +6,22 @@ struct MoveHistoryView: View {
     let selectedIndex: Int
     var prefix = "history"
     var title: String? = "Move history"
+    var showsNavigation = true
     let onSelect: (Int) -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                if let title { Text(title).font(.caption.weight(.semibold)).foregroundStyle(ChessMeStyle.muted) }
-                Spacer()
-                Button { onSelect(max(0, selectedIndex - 1)) } label: { Image(systemName: "chevron.left").frame(width: 40, height: 36) }
-                    .disabled(selectedIndex <= 0).accessibilityLabel("Previous move").accessibilityIdentifier("\(prefix).previousMove")
-                Button { onSelect(min(history.moves.count, selectedIndex + 1)) } label: { Image(systemName: "chevron.right").frame(width: 40, height: 36) }
-                    .disabled(selectedIndex >= history.moves.count).accessibilityLabel("Next move").accessibilityIdentifier("\(prefix).nextMove")
+            if title != nil || showsNavigation {
+                HStack {
+                    if let title { Text(title).font(.caption.weight(.semibold)).foregroundStyle(ChessMeStyle.muted) }
+                    Spacer()
+                    if showsNavigation {
+                        Button { onSelect(max(0, selectedIndex - 1)) } label: { Image(systemName: "chevron.left").frame(width: 40, height: 36) }
+                            .disabled(selectedIndex <= 0).accessibilityLabel("Previous move").accessibilityIdentifier("\(prefix).previousMove")
+                        Button { onSelect(min(history.moves.count, selectedIndex + 1)) } label: { Image(systemName: "chevron.right").frame(width: 40, height: 36) }
+                            .disabled(selectedIndex >= history.moves.count).accessibilityLabel("Next move").accessibilityIdentifier("\(prefix).nextMove")
+                    }
+                }
             }
             ScrollViewReader { proxy in
                 ScrollView(.horizontal, showsIndicators: true) {

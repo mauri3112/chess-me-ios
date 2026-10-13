@@ -277,10 +277,14 @@ final class ChessMeUITests: XCTestCase {
         for _ in 0..<3 where !white.isHittable { app.scrollViews["game.scroll"].swipeDown() }
         XCTAssertEqual(white.value as? String, "4:59")
         XCTAssertEqual(black.value as? String, "5:00")
-        let timing = app.staticTexts["game.clock.moveTiming"]
-        XCTAssertTrue(timing.label.contains("White had 5:00 available"))
-        XCTAssertTrue(timing.label.contains("used ≈4.0s"))
-        capture("Review clocks and time available before a move")
+        XCTAssertTrue(white.label.contains("You"))
+        XCTAssertTrue(black.label.contains("Practice partner"))
+        XCTAssertEqual(app.staticTexts["game.clock.lastMove.white"].label, "Last move ≈4.0s")
+        XCTAssertEqual(app.staticTexts["game.clock.lastMove.black"].label, "First move untimed")
+        XCTAssertFalse(app.buttons["game.previousMove"].exists)
+        XCTAssertFalse(app.buttons["game.nextMove"].exists)
+        XCTAssertFalse(app.staticTexts["Imported moves"].exists)
+        capture("Player clocks and last move durations")
         app.buttons["board.square.g8"].tap()
         app.buttons["board.square.f6"].tap()
         XCTAssertTrue(app.staticTexts["game.variation"].waitForExistence(timeout: 5))
@@ -626,25 +630,27 @@ final class ChessMeUITests: XCTestCase {
         app.tabBars.buttons["Games"].tap()
         app.buttons["game.open.guided-game"].tap()
         XCTAssertTrue(app.buttons["game.nextMoment"].waitForExistence(timeout: 10))
-        XCTAssertEqual(app.staticTexts["game.moment"].label, "Moment 1 of 2")
+        XCTAssertFalse(app.staticTexts["game.moment"].exists)
+        XCTAssertFalse(app.staticTexts["Completed game"].exists)
         XCTAssertTrue(app.buttons["board.square.e2"].label.contains("white pawn"))
         XCTAssertFalse(app.descendants(matching: .any)["analysis.panel"].exists)
         XCTAssertFalse(app.descendants(matching: .any)["game.clock.white"].exists)
         app.buttons["game.nextMoment"].tap()
-        XCTAssertEqual(app.staticTexts["game.moment"].label, "Moment 2 of 2")
+        XCTAssertFalse(app.staticTexts["game.moment"].exists)
         XCTAssertTrue(app.buttons["board.square.e4"].label.contains("white pawn"))
         XCTAssertTrue(app.buttons["game.practiceMoment"].exists)
-        XCTAssertTrue(app.buttons["game.previousMove"].exists, "Move history remains available in the guided review")
+        XCTAssertFalse(app.buttons["game.previousMove"].exists)
         capture("Guided game review")
         enterReplay()
         XCTAssertTrue(app.buttons["board.square.e2"].label.contains("white pawn"))
         XCTAssertTrue(app.descendants(matching: .any)["analysis.panel"].exists)
+        XCTAssertTrue(app.buttons["game.move.1"].exists, "The move list remains available in Explore")
         for _ in 0..<3 where !app.buttons["game.explore"].isHittable { app.scrollViews["game.scroll"].swipeDown() }
         app.buttons["game.explore"].tap()
-        XCTAssertEqual(app.staticTexts["game.moment"].label, "Moment 2 of 2")
+        XCTAssertFalse(app.staticTexts["game.moment"].exists)
         XCTAssertTrue(app.buttons["board.square.e4"].label.contains("white pawn"))
         app.buttons["game.previousMoment"].tap()
-        XCTAssertEqual(app.staticTexts["game.moment"].label, "Moment 1 of 2")
+        XCTAssertFalse(app.staticTexts["game.moment"].exists)
     }
 
     private func openSettings() {
@@ -755,6 +761,88 @@ final class ChessMeUITests: XCTestCase {
         let queue = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'library.analysis.'")).firstMatch
         XCTAssertTrue(queue.waitForExistence(timeout: 5), app.debugDescription)
         capture("Analysis continues in the library")
+    }
+
+    func testCompletedCachedReviewShowsGraphAndQualityHighlightsWithoutRerunning() throws {
+        try launchReviewedGameFixture(cached: true)
+        app.tabBars.buttons["Games"].tap()
+        app.buttons["game.open.reviewed-game"].tap()
+        let graph = app.descendants(matching: .any)["game.evaluationPlot"]
+        XCTAssertTrue(graph.waitForExistence(timeout: 10))
+        XCTAssertFalse(app.buttons["game.deepReview"].exists)
+        XCTAssertTrue(app.staticTexts["game.reviewStatus"].label.contains("ready"))
+        XCTAssertFalse(app.staticTexts["Completed game"].exists)
+        XCTAssertFalse(app.staticTexts["game.moment"].exists)
+        let match = app.staticTexts["game.match"]
+        let explore = app.buttons["game.explore"]
+        XCTAssertEqual(match.frame.midY, explore.frame.midY, accuracy: 8)
+        XCTAssertGreaterThan(explore.frame.minX, match.frame.minX)
+        for name in ["excellent", "inaccuracy", "mistake", "blunder"] {
+            let filter = app.buttons["game.quality.\(name)"]
+            for _ in 0..<5 where !filter.isHittable { app.scrollViews["game.scroll"].swipeUp() }
+            XCTAssertTrue(filter.isEnabled)
+            XCTAssertLessThanOrEqual(filter.frame.maxX, app.frame.maxX)
+            XCTAssertGreaterThanOrEqual(filter.frame.minX, app.frame.minX)
+            filter.tap()
+            XCTAssertTrue(filter.isSelected)
+            XCTAssertTrue((graph.value as? String ?? "").lowercased().contains(name))
+        }
+        XCTAssertFalse(app.buttons["game.quality.best"].exists)
+        XCTAssertFalse(app.buttons["game.quality.good"].exists)
+        capture("Completed review with highlighted blunders and unclipped extremes")
+        app.buttons["game.quality.blunder"].tap()
+        XCTAssertEqual(graph.value as? String, "All reviewed moves")
+        for _ in 0..<6 where !explore.isHittable { app.scrollViews["game.scroll"].swipeDown() }
+        explore.tap()
+        let white = app.descendants(matching: .any)["game.clock.white"]
+        let black = app.descendants(matching: .any)["game.clock.black"]
+        XCTAssertTrue(white.waitForExistence(timeout: 5))
+        XCTAssertTrue(white.label.contains("You"))
+        XCTAssertTrue(black.label.contains("Practice partner"))
+        XCTAssertFalse(app.staticTexts["Explore the game"].exists)
+        XCTAssertFalse(app.staticTexts["Clocks after move"].exists)
+        XCTAssertFalse(app.staticTexts["Imported moves"].exists)
+        XCTAssertFalse(app.buttons["game.previousMove"].exists)
+        XCTAssertFalse(app.buttons["game.nextMove"].exists)
+        capture("Simplified replay with player clock tiles")
+        for _ in 0..<8 where !app.staticTexts["Review ready"].isHittable { app.scrollViews["game.scroll"].swipeUp() }
+        XCTAssertTrue(app.staticTexts["Review ready"].exists)
+        XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'Waiting for tonight'")).firstMatch.exists)
+        app.navigationBars.buttons.firstMatch.tap()
+        app.buttons["game.open.reviewed-game"].tap()
+        XCTAssertTrue(graph.waitForExistence(timeout: 10))
+        XCTAssertFalse(app.buttons["game.deepReview"].exists)
+    }
+
+    private func launchReviewedGameFixture(cached: Bool) throws {
+        app.terminate()
+        let now = Date().timeIntervalSinceReferenceDate
+        let configurationID = "stockfish-d24-n100000-m32-t15.0-l120-a35-total5000000-threads2"
+        let scores = [100_000, 50, -600, 1_000, -100_000]
+        let qualities = ["excellent", "inaccuracy", "mistake", "inaccuracy", "blunder"]
+        let played = ["e2e4", "g1f3", "f1b5", "b5a4", "e1g1"]
+        let assessments: [[String: Any]] = (0..<5).map { index in
+            ["ply": index * 2, "positionFEN": "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+             "playedMove": played[index], "bestMove": played[index], "quality": qualities[index],
+             "centipawnLoss": 100, "whiteScore": scores[index], "completedDepth": 24, "isProvisional": true]
+        }
+        let review: [String: Any] = ["gameID": "reviewed-game", "findings": [], "analyzedPlies": 5, "totalPlies": 5,
+            "source": "device", "completedAt": now, "engineVersion": "stockfish-19-1a298aa575a0-chessme-v1",
+            "configurationID": configurationID, "moveAssessments": assessments]
+        let job: [String: Any] = ["id": "reviewed-job", "gameID": "reviewed-game", "level": "balanced", "nightOnly": true,
+            "requiresPro": false, "createdAt": now - 60, "state": "completed", "checkpoint": review,
+            "message": "Waiting for tonight and charging",
+            "configuration": ["engine": "stockfish", "depth": 24, "nodesPerCandidate": 100_000, "memoryMB": 32,
+                              "secondsPerPosition": 15, "topMoves": 2, "searchNodeLimit": 5_000_000, "engineThreads": 2]]
+        let fixture: [String: Any] = [
+            "games": [["id": "reviewed-game", "username": "You", "white": "You", "black": "Practice partner",
+                       "playedAt": now - 60, "playerSide": "white", "moves": "e4 e5 Nf3 Nc6 Bb5 a6 Ba4 Nf6 O-O", "status": "resign",
+                       "clockData": ["initialSeconds": 300, "incrementSeconds": 3, "source": "lichess",
+                                     "remainingCentiseconds": [30_000, 30_000, 29_000, 29_500, 28_500, 29_000, 28_000, 27_500, 26_000]]]],
+            "analyses": cached ? [] : [review], "localAnalysisJobs": [job], "practice": [], "isDemo": true, "skippedGames": 0]
+        app.launchArguments = ["--ui-testing", "--reset-engine", "--reset-evaluation", "--reset-local-analysis"]
+        app.launchEnvironment["CHESSME_UI_TEST_LIBRARY"] = String(decoding: try JSONSerialization.data(withJSONObject: fixture), as: UTF8.self)
+        app.launch()
     }
 
     private func board(_ design: String) -> XCUIElement {

@@ -110,4 +110,30 @@ final class LocalAnalysisQueueTests: XCTestCase {
         recovered.recoverAfterInterruption()
         XCTAssertEqual(recovered.state, .paused)
     }
+
+    func testCachedCompleteReviewNeverSaysItIsWaitingForTonight() throws {
+        let game = try XCTUnwrap(DemoContent.games().first)
+        let complete = try LocalAnalyzer(options: AnalysisOptions(maximumDepth: 1)).analyze(game: game)
+        var job = LocalAnalysisJob(gameID: game.id, configuration: DeviceEngineConfiguration(), level: .balanced, nightOnly: true)
+        job.checkpoint = complete; job.state = .completed
+        XCTAssertEqual(job.statusText, "Review ready")
+        job.message = "Waiting for tonight and charging"
+        XCTAssertEqual(job.statusText, "Review ready")
+        job.state = .running
+        XCTAssertFalse(job.isPending)
+        job.recoverAfterInterruption()
+        XCTAssertEqual(job.state, .completed)
+        XCTAssertEqual(job.statusText, "Review ready")
+    }
+
+    func testCompletedHigherBudgetCoversSmallerRequestsWithoutChangingEngine() {
+        var high = DeviceEngineConfiguration()
+        high.depth = 32; high.secondsPerPosition = 180; high.searchNodeLimit = 100_000_000
+        var low = high
+        low.depth = 24; low.secondsPerPosition = 15; low.searchNodeLimit = 5_000_000; low.memoryMB = 32
+        XCTAssertTrue(high.covers(low))
+        XCTAssertFalse(low.covers(high))
+        low.engine = .arasan
+        XCTAssertFalse(high.covers(low))
+    }
 }

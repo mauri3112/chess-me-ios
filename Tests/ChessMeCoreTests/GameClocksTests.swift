@@ -24,6 +24,12 @@ struct GameClocksTests {
         #expect(GameClockData.clockLabel(29_120) == "4:51")
         #expect(GameClockData.clockLabel(940) == "0:09.4")
         #expect(GameClockData.clockLabel(360_000) == "1:00:00")
+        #expect(timeline.lastMove(for: .white, at: 0) == nil)
+        #expect(timeline.lastMove(for: .black, at: 1) == nil)
+        #expect(timeline.lastMove(for: .white, at: 3)?.estimatedSpent == 1_180)
+        #expect(timeline.lastMove(for: .black, at: 3)?.firstMoveUntimed == true)
+        #expect(timeline.lastMove(for: .white, at: 4)?.estimatedSpent == 1_180)
+        #expect(timeline.lastMove(for: .black, at: 4)?.estimatedSpent == 1_850)
     }
 
     @Test func berserkStartingClocksAndMissingReadingsNeverInventTime() throws {
@@ -38,6 +44,7 @@ struct GameClocksTests {
         let truncated = try replay(readings: [30_000, 30_000, 29_000])
         #expect(truncated.snapshots[4].black == nil)
         #expect(truncated.moves[3].estimatedSpent == nil)
+        #expect(truncated.lastMove(for: .black, at: 4)?.estimatedSpent == nil, "Never reuse an older player's duration for a missing latest clock")
         #expect(GameClockData.clockLabel(nil) == "—")
     }
 
@@ -73,6 +80,9 @@ struct GameClocksTests {
         #expect(timeline.snapshots[0].white == 25_000)
         #expect(timeline.moves[2].side == .black)
         #expect(timeline.moves[2].estimatedSpent == 1_000)
+        #expect(timeline.lastMove(for: .black, at: 1)?.side == .black)
+        #expect(timeline.lastMove(for: .white, at: 1) == nil)
+        #expect(timeline.lastMove(for: .black, at: 3)?.estimatedSpent == 1_000)
     }
 
     @Test func pgnClockCommentsStayOnMainlineAndPreserveMissingValues() throws {

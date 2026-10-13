@@ -109,7 +109,7 @@ struct LocalAnalysisStatusView: View {
                     .symbolEffect(.pulse, isActive: running && !reduceMotion)
                 VStack(alignment: .leading, spacing: 3) {
                     Text("\(job.configuration.engine.title) · on device").font(.caption.weight(.semibold))
-                    Text(job.message ?? (job.nightOnly ? "Waiting for tonight and charging" : "Waiting to start"))
+                    Text(job.statusText)
                         .font(.caption).foregroundStyle(ChessMeStyle.muted)
                 }
                 Spacer()

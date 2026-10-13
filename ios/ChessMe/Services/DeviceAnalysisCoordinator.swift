@@ -44,6 +44,7 @@ final class DeviceAnalysisCoordinator {
         model.updateLibrary { snapshot in
             for index in (snapshot.localAnalysisJobs ?? []).indices { snapshot.localAnalysisJobs?[index].recoverAfterInterruption() }
         }
+        model.reconcileLocalAnalysisResults()
         if model.library.localAnalysisJobs?.isEmpty == false { _ = model.persist() }
     }
 
@@ -70,11 +71,17 @@ final class DeviceAnalysisCoordinator {
                  nightOnly: Bool = false, requiresPro: Bool = false) {
         guard let model, model.canSaveLibrary else { return }
         if let level, !Self.hardware.supports(level) { model.notice = level.requirement; return }
+        let completed = Dictionary(games.compactMap { game in
+            model.completeDeviceReview(for: game.id, covering: configuration).map { (game.id, $0) }
+        }, uniquingKeysWith: { first, _ in first })
         model.updateLibrary { snapshot in
             var jobs = snapshot.localAnalysisJobs ?? []
             for game in games where game.isFinished {
                 let signature = configuration.options.configurationID
                 if let existing = jobs.firstIndex(where: { $0.gameID == game.id && $0.matches(configuration: configuration, level: level) }) {
+                    if let ready = completed[game.id] {
+                        jobs[existing].checkpoint = ready; jobs[existing].state = .completed; jobs[existing].message = "Review ready"
+                    }
                     if !nightOnly {
                         jobs[existing].nightOnly = false
                         jobs[existing].requiresPro = requiresPro
@@ -82,13 +89,13 @@ final class DeviceAnalysisCoordinator {
                     }
                     continue
                 }
-                let alreadyReviewed = (snapshot.analyses + (snapshot.analysisHistory ?? [])).first {
+                let alreadyReviewed = completed[game.id] ?? (snapshot.analyses + (snapshot.analysisHistory ?? [])).first {
                     $0.gameID == game.id && $0.source == "device" && $0.configurationID == signature &&
                     $0.engineVersion == LocalAnalyzer(options: configuration.options).engineVersion
                 }
                 var job = LocalAnalysisJob(gameID: game.id, configuration: configuration, level: level, nightOnly: nightOnly, requiresPro: requiresPro)
                 job.checkpoint = alreadyReviewed
-                if alreadyReviewed?.isComplete == true { job.state = .completed }
+                if alreadyReviewed?.isComplete == true { job.state = .completed; job.message = "Review ready" }
                 jobs.append(job)
             }
             snapshot.localAnalysisJobs = jobs
@@ -312,6 +319,17 @@ final class DeviceAnalysisCoordinator {
         }
         while !Task.isCancelled {
             guard let job = nextJob() else { break }
+            if let ready = model.completeDeviceReview(for: job.gameID, covering: job.configuration) {
+                mutate(job.id) { $0.checkpoint = ready; $0.state = .completed; $0.message = "Review ready" }
+                model.acceptDeviceCheckpoint(ready)
+                guard model.persist() else {
+                    mutate(job.id) { $0.state = .paused; $0.message = "Review paused because the checkpoint could not be saved." }
+                    successful = false
+                    break
+                }
+                updateSystemProgress()
+                continue
+            }
             guard let game = model.library.games.first(where: { $0.id == job.gameID }), game.isFinished else {
                 mutate(job.id) { $0.state = .failed; $0.message = "Only saved, finished games can be analyzed." }
                 _ = model.persist(); successful = false; continue
