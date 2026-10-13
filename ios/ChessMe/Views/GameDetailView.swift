@@ -441,9 +441,9 @@ struct ReviewCardView: View {
             .navigationTitle("Review moment").navigationBarTitleDisplayMode(.inline).toolbar(.visible, for: .navigationBar)
             .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Done") { dismiss() } } }
             .task {
-                let game = model.library.games.first { $0.id == finding.gameID }
-                let finding = finding
-                let work = Task.detached(priority: .userInitiated) { try MoveHistory(game: game, finding: finding) }
+                let savedFinding = finding
+                let game = model.library.games.first { $0.id == savedFinding.gameID }
+                let work = Task.detached(priority: .userInitiated) { try MoveHistory(game: game, finding: savedFinding) }
                 gameHistory = try? await withTaskCancellationHandler(operation: { try await work.value }, onCancel: { work.cancel() })
                 guard !Task.isCancelled else { return }
                 rebuildMoveHistory()

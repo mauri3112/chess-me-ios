@@ -1,6 +1,6 @@
 {
   "backend_included": false,
-  "client_build": "20",
+  "client_build": "21",
   "client_licence": "GPL-3.0-only",
   "client_version": "0.2.0",
   "files": {
@@ -8,7 +8,7 @@
     "CLIENT-LICENSE.md": "d4f39a85718a64a49b25d788bb8a2728331d257027f1de5827bf2d93570548a1",
     "LICENSE": "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986",
     "Package.swift": "d3f1e7b599f3699040622b623da762af3b76a4883efce7dfb731b26281c19558",
-    "README.md": "2482fa885335e2de5b247a21a92a14df567461baeed533f7bf430f8402f4a34c",
+    "README.md": "c9dd9da916babd7dda501a782da0909ce8339a659cbc654eace3b90be8a012e5",
     "Sources/ChessMeCore/ArasanAnalyzer.swift": "21a85dacb46b49e0454bd386ff6453bed0e4736e15fda94f7187365d68a8312f",
     "Sources/ChessMeCore/Chess.swift": "e36a6b2f7b09547e806bb25228d5f637e19ea40acbe4847753061e87dcf5d5b1",
     "Sources/ChessMeCore/EngineConfiguration.swift": "17e1238667266c9176ae6e1a9f3eae839cfe1ea348106aeafe02ec7a1ef0df68",
@@ -401,7 +401,7 @@
     "docs/design/two-new-designs.png": "71f96f6e37c09c6a430b3fb8ae32a75d2486f66967c14e74ecac6c90635d11bc",
     "docs/design/two-new-designs.svg": "2c6ae644204fea9511d779db0caa758e1bde01339207b54fd78673d1dd608e69",
     "docs/opening-book.md": "654e31d1c9a2de1ab5cc4597995b996a6f688edf743796cdfae6b6d7d60fcfc7",
-    "ios/ChessMe.xcodeproj/project.pbxproj": "4cb448a6fbd83bb9e02abf299ccaeac9be5133bfb37bc1113178369618e7576d",
+    "ios/ChessMe.xcodeproj/project.pbxproj": "7a2758117df47d2a8baa7d7d13e6e73380553d8eec9ff6aa7cef14d1cb66d282",
     "ios/ChessMe.xcodeproj/xcshareddata/xcschemes/ChessMe.xcscheme": "acb67378c1b656df781498f4069eb7fab34633d7a1bf2cf3ac33028526bbdb6b",
     "ios/ChessMe/Assets.xcassets/AccentColor.colorset/Contents.json": "e4d8e0e7f59a2ab24a21b0faa59cd7c1c857567bfd71eb9c8e2f79ee77f33e5f",
     "ios/ChessMe/Assets.xcassets/AppIcon.appiconset/AppIcon.png": "c1907a651d898c2b08735f4897c8fcb86e5cd3f9311b8efa4c4eda69597cf890",
@@ -481,7 +481,7 @@
     "ios/ChessMe/Assets.xcassets/ChessPieces/piece-slate-white-rook.imageset/piece-slate-white-rook.pdf": "14927fc3856a3b08cb1748dc23f5e53a113faa87c921275853cd3b6434c8356c",
     "ios/ChessMe/Assets.xcassets/Contents.json": "10e3b5dc202f1cd9fad1f688c8fc9fe9e9669bf3f8295e67d216b10fd99b6f49",
     "ios/ChessMe/ChessMeApp.swift": "aea1ae0c6d0d2ea1f65aa5347986289d5df37ac61f8d0685d3669f35f083d0c2",
-    "ios/ChessMe/Info.plist": "687a914c311a3f483167cdfe3a96a9c7f7021010a4f8e33ca1237631dd8cffd6",
+    "ios/ChessMe/Info.plist": "793a85c75a74e07867415a00ac44138315f7f3b17e513d2cc1204f29c79b0471",
     "ios/ChessMe/Models/AppModel+Cloud.swift": "c5544a0d52259a308b00c6c76385139d436639f8b202f6ac49f254143372f1ce",
     "ios/ChessMe/Models/AppModel+Learning.swift": "ca425c77c850dcc4e68e97219cd9bbb90392a095e764b2bbecca9d8a553fb3c9",
     "ios/ChessMe/Models/AppModel.swift": "3bdb3d8b5fffb4998c6ba791183b4e0fdbb7218316c0c1b7af771d1e360ad016",
@@ -510,7 +510,7 @@
     "ios/ChessMe/Views/FavoritesView.swift": "71977208686e3c087c4f003831d05f0e77f0a1cf9bf09ed5b37b094d49eb68e3",
     "ios/ChessMe/Views/GameAnalysisIndicator.swift": "571dc0bc26fec1f8d1c365ddf93170dc4a7f5d469288eb9ece69cfb64bfb04a4",
     "ios/ChessMe/Views/GameAnalysisSelectionView.swift": "7cc3982931da6196d35ef7633706265eabc11fb4dd3fb324a8ec1bb5e6636cb9",
-    "ios/ChessMe/Views/GameDetailView.swift": "b36c75c93b8ce310ebf35e853c5405752fc60105b2b710b56aa395179c99668f",
+    "ios/ChessMe/Views/GameDetailView.swift": "ddef913af2b95235817c88d0c6ee43b7dc26b89e4898041cbc879173b23eba34",
     "ios/ChessMe/Views/LessonView.swift": "473661e180c7d7e3b11a6375513aa5c1c152e031000c73ea67e847e329e146f3",
     "ios/ChessMe/Views/LibraryView.swift": "ec58b8f283b63c8fc37d50f00ddfa03bb00cd01bb695c0f55b9fbf6a7fb6bac9",
     "ios/ChessMe/Views/LocalAnalysisSettingsView.swift": "fbfdb61182b56ed7bb2f886e461e0b33c31abb4779d33db013ae559575ea6499",
@@ -541,5 +541,5 @@
     "scripts/generate-opening-book.py": "310f83a7a05daf65b5b5bab471d0d7db9a59511a0aac023859f6a533a8c2aca2",
     "scripts/typecheck-ios.sh": "4fcf1196e7896dd1d7f12918b7da0582891fb5787674059df129f4a959b68268"
   },
-  "release_tag": "ios-0.2.0-build20"
+  "release_tag": "ios-0.2.0-build21"
 }
