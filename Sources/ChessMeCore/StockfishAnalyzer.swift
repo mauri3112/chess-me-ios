@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-only
 import Foundation
 import CStockfish
+#if os(iOS)
+import os
+#endif
 
 public enum StockfishEngine {
     public static let version = "stockfish-19-1a298aa575a0-chessme-v1"
@@ -10,6 +13,17 @@ public enum StockfishEngine {
         return (try? String(contentsOf: url, encoding: .utf8)) ?? ""
     }
     public static func trimMemory() { chessme_stockfish_trim_memory() }
+    /// Advisory app headroom, queried afresh before each search. Physical device
+    /// RAM is not the amount iOS lets this process allocate.
+    public static var availableMemoryMegabytes: Int? {
+        #if os(iOS) && !targetEnvironment(simulator)
+        return Int(os_proc_available_memory() / 1_048_576)
+        #else
+        // Simulator processes do not have the physical iOS app memory limit.
+        // The API can return zero there even when allocation is possible.
+        return nil
+        #endif
+    }
 }
 
 enum StockfishError: LocalizedError {
@@ -88,6 +102,10 @@ struct StockfishAnalyzer {
             return PositionEvaluation(moves: [], completedDepth: 0, nodes: 0)
         }
         guard requiredMove == nil || position.legalMoves().contains(requiredMove!) else { throw StockfishError.invalidPosition }
+        guard let cacheMB = LocalAnalysisMemoryPolicy.cacheMegabytes(requested: options.memoryMegabytes,
+                                                                   availableToAppMB: StockfishEngine.availableMemoryMegabytes) else {
+            throw LocalAnalysisResourceError.insufficientMemory
+        }
         guard let network = Bundle.module.url(forResource: "nn-1a298aa575a0", withExtension: "nnue", subdirectory: "Resources") else {
             throw StockfishError.missingNetwork
         }
@@ -95,7 +113,7 @@ struct StockfishAnalyzer {
         let callbacks = StockfishCallbacks(position: position, cancellation: cancellation, update: update)
         let context = Unmanaged.passUnretained(callbacks).toOpaque()
         let code = chessme_stockfish_analyze(network.path, root.fen, root.moves, requiredMove?.uci ?? "",
-            Int32(options.maximumDepth), Int32(options.memoryMegabytes), Int32((options.timeLimitSeconds ?? 3) * 1_000),
+            Int32(options.maximumDepth), Int32(cacheMB), Int32((options.timeLimitSeconds ?? 3) * 1_000),
             UInt64(options.searchNodeLimit ?? options.nodesPerMove * max(1, position.legalMoves().count)),
             Int32(options.engineThreads), context,
             { pointer in

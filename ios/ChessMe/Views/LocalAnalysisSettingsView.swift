@@ -15,10 +15,11 @@ struct LocalAnalysisSettingsView: View {
             } header: { Text("Overnight analysis") } footer: {
                 Text(hardware.supportsOvernight
                      ? "Reviews saved games in your selected period between 10 pm and 7 am, while charging. iOS chooses when background work can run. Completed decisions are saved and unfinished reviews resume later."
-                     : "Overnight deep analysis requires an iPhone 15 or newer, or a supported iPad with at least 8 GB memory. Ordinary on-device reviews remain available.")
+                     : LocalAnalysisLevel.balanced.requirement)
             }
             Section {
                 ForEach(LocalAnalysisLevel.allCases) { level in
+                    let estimate = model.nightEstimate(level)
                     Button {
                         model.overnightSettings.level = level
                     } label: {
@@ -27,7 +28,11 @@ struct LocalAnalysisSettingsView: View {
                                 .foregroundStyle(hardware.supports(level) ? ChessMeStyle.green : ChessMeStyle.muted)
                             VStack(alignment: .leading, spacing: 5) {
                                 Text("\(level.title) · depth \(level.depth)").font(.body.weight(.semibold))
-                                Text(hardware.supports(level) ? "Up to \(Int(model.deepConfiguration(level).options.timeLimitSeconds ?? 0)) seconds per decision" : level.requirement)
+                                Text(estimate.summary)
+                                    .font(.subheadline).foregroundStyle(ChessMeStyle.green)
+                                    .accessibilityIdentifier("localAnalysis.capacity.\(level.rawValue)")
+                                Text(estimate.usesMeasuredSpeed ? "Based on completed reviews on this device"
+                                     : (model.isDemo || model.windowGames.isEmpty ? "Initial estimate for a 40-move game" : "Initial estimate for games like yours"))
                                     .font(.caption).foregroundStyle(ChessMeStyle.muted)
                             }
                             Spacer()
@@ -42,11 +47,12 @@ struct LocalAnalysisSettingsView: View {
                     .accessibilityAddTraits(hardware.bounded(model.overnightSettings.level) == level ? .isSelected : [])
                 }
             } header: { Text("Depth target") } footer: {
-                Text("This level also applies when you start a game review yourself. Search may stop at its time or work limit before reaching the target. Each review shows the depth actually reached. Higher targets take longer.")
+                Text("Estimates use your recent game lengths and improve after complete reviews. iOS scheduling and temperature affect nightly capacity. Higher targets take longer and may not be reached within the search limit. This level also applies to reviews you start yourself.")
             }
             Section {
                 LabeledContent("Engine", value: model.deepConfiguration(.balanced).engine.title)
                 Text("Game analysis stays on this device and uses no cloud allowance.").font(.footnote)
+                Text("Memory use adjusts automatically. Each review shows the depth actually reached.").font(.footnote)
                 if #unavailable(iOS 26.0) {
                     Text("iOS 26 or later is needed to continue an immediate review after leaving the app. On this version, unfinished work is saved and can resume while charging.")
                         .font(.footnote).foregroundStyle(ChessMeStyle.muted)

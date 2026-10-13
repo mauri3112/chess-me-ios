@@ -16,18 +16,14 @@ public enum LocalAnalysisLevel: String, Codable, CaseIterable, Identifiable, Sen
         switch self { case .balanced: return 5_000_000; case .deep: return 20_000_000; case .maximum: return 100_000_000 }
     }
     public var memoryMB: Int {
-        switch self { case .balanced: return 64; case .deep: return 128; case .maximum: return 256 }
+        switch self { case .balanced: return 32; case .deep: return 64; case .maximum: return 128 }
     }
     public var requirement: String {
-        switch self {
-        case .balanced: return "iPhone 15 or newer"
-        case .deep: return "iPhone 15 or newer with at least 8 GB memory"
-        case .maximum: return "iPhone 17 or newer with at least 8 GB memory"
-        }
+        "An iPhone or iPad running iOS 17 or later"
     }
 }
 
-/// Eligibility is a product policy, not a claim about measured engine speed.
+/// Depth is a time/work preference. Device memory only bounds the search cache.
 public struct LocalAnalysisHardware: Equatable, Sendable {
     public let modelIdentifier: String
     public let memoryMB: Int
@@ -35,29 +31,82 @@ public struct LocalAnalysisHardware: Equatable, Sendable {
     public init(modelIdentifier: String, memoryMB: Int, isSimulator: Bool = false) {
         self.modelIdentifier = modelIdentifier; self.memoryMB = memoryMB; self.isSimulator = isSimulator
     }
-    private var phoneFamily: Int? {
-        guard modelIdentifier.hasPrefix("iPhone") else { return nil }
-        return Int(modelIdentifier.dropFirst(6).split(separator: ",").first ?? "")
-    }
     public var supportsOvernight: Bool {
-        if isSimulator { return true }
-        // iPhone 15 / 15 Plus share identifier family 15 with the older 14 Pro.
-        if ["iPhone15,4", "iPhone15,5"].contains(modelIdentifier) { return true }
-        if let phoneFamily { return phoneFamily >= 16 }
-        return modelIdentifier.hasPrefix("iPad") && memoryMB >= 7_500
+        isSimulator || modelIdentifier.hasPrefix("iPhone") || modelIdentifier.hasPrefix("iPad")
     }
     public func supports(_ level: LocalAnalysisLevel) -> Bool {
-        guard supportsOvernight else { return false }
-        if isSimulator { return true }
-        switch level {
-        case .balanced: return true
-        case .deep: return memoryMB >= 7_500
-        case .maximum:
-            return memoryMB >= 7_500 && ((phoneFamily ?? 0) >= 18 || modelIdentifier.hasPrefix("iPad"))
-        }
+        supportsOvernight
     }
     public func bounded(_ level: LocalAnalysisLevel) -> LocalAnalysisLevel {
-        LocalAnalysisLevel.allCases.filter { supports($0) && $0.depth <= level.depth }.last ?? .balanced
+        supportsOvernight ? level : .balanced
+    }
+    public func cacheMegabytes(for level: LocalAnalysisLevel) -> Int {
+        min(level.memoryMB, memoryMB < 4_000 ? 32 : 128)
+    }
+    public var engineThreads: Int { memoryMB < 4_000 ? 1 : 2 }
+}
+
+public enum LocalAnalysisResourceError: LocalizedError {
+    case insufficientMemory
+    public var errorDescription: String? { "Waiting for device memory to recover. Completed decisions are saved." }
+}
+
+public enum LocalAnalysisMemoryPolicy {
+    // Leave room for a cold NNUE load, search-thread state and the rest of the
+    // app. This is an allocation reserve, not a measured total app footprint.
+    public static let reserveMegabytes = 384
+    public static func cacheMegabytes(requested: Int, availableToAppMB: Int?) -> Int? {
+        let ceiling = min(128, max(8, requested))
+        guard let availableToAppMB else { return ceiling }
+        let budget = min(ceiling, max(0, availableToAppMB - reserveMegabytes))
+        return [8, 16, 32, 64, 128].last { $0 <= budget }
+    }
+}
+
+/// A complete review measured on this device. Partial or interrupted searches
+/// must not make an opening-only sample look like a typical complete game.
+public struct LocalAnalysisTiming: Codable, Equatable, Sendable {
+    public let level: LocalAnalysisLevel
+    public let configurationID: String
+    public let engineVersion: String
+    public let hardwareIdentifier: String
+    public let decisions: Int
+    public let seconds: Double
+    public init(level: LocalAnalysisLevel, configurationID: String, engineVersion: String,
+                hardwareIdentifier: String, decisions: Int, seconds: Double) {
+        self.level = level; self.configurationID = configurationID; self.engineVersion = engineVersion
+        self.hardwareIdentifier = hardwareIdentifier; self.decisions = decisions; self.seconds = seconds
+    }
+}
+
+public struct LocalAnalysisNightEstimate: Equatable, Sendable {
+    public let minimumGames: Int
+    public let maximumGames: Int
+    public let usesMeasuredSpeed: Bool
+    public var summary: String {
+        if maximumGames == 0 { return "A game may need more than one night" }
+        if minimumGames == 0 { return "Up to \(maximumGames) \(maximumGames == 1 ? "game" : "games") per night" }
+        if minimumGames == maximumGames { return "About \(maximumGames) \(maximumGames == 1 ? "game" : "games") per night" }
+        return "About \(minimumGames)–\(maximumGames) games per night"
+    }
+
+    public init(configuration: DeviceEngineConfiguration, typicalDecisions: Double = 40,
+                hardwareIdentifier: String, engineVersion: String, timings: [LocalAnalysisTiming] = []) {
+        let matching = timings.filter {
+            $0.configurationID == configuration.options.configurationID && $0.hardwareIdentifier == hardwareIdentifier &&
+            $0.engineVersion == engineVersion && $0.decisions > 0 && $0.seconds.isFinite && $0.seconds > 0
+        }.suffix(10)
+        usesMeasuredSpeed = !matching.isEmpty
+        let measured = matching.reduce(0.0) { $0 + $1.seconds } / Double(max(1, matching.reduce(0) { $0 + $1.decisions }))
+        let secondsPerDecision = usesMeasuredSpeed ? max(0.25, measured) : Double(configuration.secondsPerPosition)
+        let decisions = typicalDecisions.isFinite ? max(1, typicalDecisions) : 40
+        let secondsPerGame = max(1, secondsPerDecision * decisions)
+        // Capacity planning assumes three hours of opportunities. Leave 20–50%
+        // for thermal throttling, startup, interruption and checkpoint work.
+        // iOS does not promise that this processing time will be granted.
+        let capacity = min(999, 3 * 3_600 / secondsPerGame)
+        minimumGames = Int((capacity * 0.5).rounded(.down))
+        maximumGames = Int((capacity * 0.8).rounded(.down))
     }
 }
 
@@ -87,6 +136,8 @@ public struct LocalAnalysisJob: Codable, Identifiable, Sendable {
     public var state: State = .queued
     public var message: String?
     public var checkpoint: GameAnalysis?
+    public var processingSeconds: Double?
+    public var timedDecisions: Int?
 
     public init(gameID: String, configuration: DeviceEngineConfiguration, level: LocalAnalysisLevel? = nil,
                 nightOnly: Bool = false, requiresPro: Bool = false, createdAt: Date = Date(), id: String = UUID().uuidString) {
@@ -99,6 +150,15 @@ public struct LocalAnalysisJob: Codable, Identifiable, Sendable {
         return Double(checkpoint.analyzedPlies) / Double(checkpoint.totalPlies)
     }
     public var reachedDepth: Int? { checkpoint?.moveAssessments?.map(\.completedDepth).min() }
+    /// A cache-policy update must not discard an existing review checkpoint.
+    /// Continue that job with its saved configuration and search identity.
+    public func matches(configuration requested: DeviceEngineConfiguration, level requestedLevel: LocalAnalysisLevel?) -> Bool {
+        if configuration == requested { return true }
+        guard level != nil, level == requestedLevel, configuration.engine == .stockfish else { return false }
+        var ignoringCache = configuration
+        ignoringCache.memoryMB = requested.memoryMB
+        return ignoringCache == requested
+    }
     public mutating func recoverAfterInterruption() {
         guard state == .running else { return }
         state = .queued

@@ -20,9 +20,11 @@ final class DeviceAnalysisCoordinator {
     private var memoryPressureUntil: Date?
     private var memoryRecovery: Task<Void, Never>?
     private let schedulerEnabled: Bool
+    private let availableMemoryMB: () -> Int?
 
-    init(model: AppModel, schedulerEnabled: Bool = true) {
-        self.model = model; self.schedulerEnabled = schedulerEnabled
+    init(model: AppModel, schedulerEnabled: Bool = true,
+         availableMemoryMB: @escaping () -> Int? = { StockfishEngine.availableMemoryMegabytes }) {
+        self.model = model; self.schedulerEnabled = schedulerEnabled; self.availableMemoryMB = availableMemoryMB
         isActive = UIApplication.shared.applicationState != .background
         if schedulerEnabled {
             BGTaskScheduler.shared.register(forTaskWithIdentifier: Self.overnightIdentifier, using: nil) { [weak self] task in
@@ -47,6 +49,11 @@ final class DeviceAnalysisCoordinator {
 
     static var hardware: LocalAnalysisHardware {
         #if targetEnvironment(simulator)
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("--local-analysis-base-iphone15") {
+            return LocalAnalysisHardware(modelIdentifier: "iPhone15,4", memoryMB: 6_144)
+        }
+        #endif
         return LocalAnalysisHardware(modelIdentifier: "Simulator", memoryMB: 8_192, isSimulator: true)
         #else
         var system = utsname()
@@ -67,7 +74,7 @@ final class DeviceAnalysisCoordinator {
             var jobs = snapshot.localAnalysisJobs ?? []
             for game in games where game.isFinished {
                 let signature = configuration.options.configurationID
-                if let existing = jobs.firstIndex(where: { $0.gameID == game.id && $0.configuration.options.configurationID == signature }) {
+                if let existing = jobs.firstIndex(where: { $0.gameID == game.id && $0.matches(configuration: configuration, level: level) }) {
                     if !nightOnly {
                         jobs[existing].nightOnly = false
                         jobs[existing].requiresPro = requiresPro
@@ -110,9 +117,9 @@ final class DeviceAnalysisCoordinator {
             guard Self.hardware.supports(level) else { model.notice = LocalAnalysisLevel.balanced.requirement; return }
             let configuration = model.deepConfiguration(level)
             if let activeJobID, let current = model.library.localAnalysisJobs?.first(where: { $0.id == activeJobID }),
-               current.nightOnly && current.configuration != configuration { worker?.cancel() }
+               current.nightOnly && !current.matches(configuration: configuration, level: level) { worker?.cancel() }
             model.updateLibrary { snapshot in
-                snapshot.localAnalysisJobs?.removeAll { $0.nightOnly && $0.state != .completed && $0.configuration != configuration }
+                snapshot.localAnalysisJobs?.removeAll { $0.nightOnly && $0.state != .completed && !$0.matches(configuration: configuration, level: level) }
             }
             enqueue(games: model.windowGames, configuration: configuration, level: level,
                     nightOnly: true, requiresPro: model.selectedWindow != .day)
@@ -216,6 +223,10 @@ final class DeviceAnalysisCoordinator {
         if job.requiresPro && !model.subscriptions.isPro { return "Pro access is needed to resume this review." }
         if let level = job.level, !Self.hardware.supports(level) { return level.requirement }
         if let memoryPressureUntil, Date() < memoryPressureUntil { return "Waiting for device memory to recover." }
+        if job.configuration.engine == .stockfish,
+           LocalAnalysisMemoryPolicy.cacheMegabytes(requested: job.configuration.memoryMB, availableToAppMB: availableMemoryMB()) == nil {
+            return LocalAnalysisResourceError.insufficientMemory.localizedDescription
+        }
         if ProcessInfo.processInfo.thermalState == .serious || ProcessInfo.processInfo.thermalState == .critical { return "Waiting for your device to cool down." }
         if job.level != nil && ProcessInfo.processInfo.isLowPowerModeEnabled { return "Waiting for Low Power Mode to turn off." }
         if job.nightOnly {
@@ -242,9 +253,16 @@ final class DeviceAnalysisCoordinator {
         memoryPressureUntil = Date().addingTimeInterval(60)
         interrupt("Waiting for device memory to recover. Completed decisions are saved.")
         memoryRecovery?.cancel()
+        memoryRecovery = nil
+        scheduleMemoryRecovery()
+    }
+
+    private func scheduleMemoryRecovery() {
+        guard memoryRecovery == nil else { return }
         memoryRecovery = Task { [weak self] in
             do { try await Task.sleep(for: .seconds(60)) } catch { return }
             self?.memoryPressureUntil = nil
+            self?.memoryRecovery = nil
             self?.conditionsChanged()
         }
     }
@@ -254,6 +272,11 @@ final class DeviceAnalysisCoordinator {
         let jobs = model.library.localAnalysisJobs ?? []
         guard nextJob() != nil else {
             for job in jobs where job.state == .queued { mutate(job.id) { $0.message = waitingReason(for: job) } }
+            if jobs.contains(where: { $0.state == .queued && $0.configuration.engine == .stockfish &&
+                LocalAnalysisMemoryPolicy.cacheMegabytes(requested: $0.configuration.memoryMB, availableToAppMB: availableMemoryMB()) == nil }) {
+                Task.detached(priority: .utility) { StockfishEngine.trimMemory() }
+                scheduleMemoryRecovery()
+            }
             _ = model.persist()
             return
         }
@@ -305,6 +328,7 @@ final class DeviceAnalysisCoordinator {
             let workOptions = options
             let checkpoint = job.checkpoint
             model.deviceAnalysisState(running: true, progress: job.progress, message: "Analyzing \(game.label)")
+            let decisionStarted = ProcessInfo.processInfo.systemUptime
             do {
                 let work = Task.detached(priority: .utility) { [weak self] in
                     try LocalAnalyzer(options: workOptions).analyze(game: game, previousAnalysis: checkpoint,
@@ -324,10 +348,21 @@ final class DeviceAnalysisCoordinator {
                 guard analysis.isComplete || analysis.analyzedPlies > (checkpoint?.analyzedPlies ?? 0) else {
                     throw ChessError.invalidPGN("The engine made no further progress.")
                 }
+                let elapsed = ProcessInfo.processInfo.systemUptime - decisionStarted
+                let completedDecisions = analysis.analyzedPlies - (checkpoint?.analyzedPlies ?? 0)
                 mutate(job.id) {
                     $0.checkpoint = analysis
+                    $0.processingSeconds = ($0.processingSeconds ?? 0) + elapsed
+                    $0.timedDecisions = ($0.timedDecisions ?? 0) + completedDecisions
                     $0.state = analysis.isComplete ? .completed : .queued
                     $0.message = analysis.isComplete ? "Review ready" : "\(analysis.analyzedPlies)/\(analysis.totalPlies) decisions saved"
+                }
+                if analysis.isComplete, job.configuration.engine == .stockfish, let level = job.level,
+                   let finished = model.library.localAnalysisJobs?.first(where: { $0.id == job.id }),
+                   finished.timedDecisions == analysis.totalPlies, let seconds = finished.processingSeconds {
+                    model.recordLocalAnalysisTiming(LocalAnalysisTiming(level: level,
+                        configurationID: job.configuration.options.configurationID, engineVersion: analysis.engineVersion,
+                        hardwareIdentifier: Self.hardware.modelIdentifier, decisions: analysis.totalPlies, seconds: seconds))
                 }
                 model.acceptDeviceCheckpoint(analysis)
                 let message = analysis.isComplete ? "Your on-device review is ready" : "\(analysis.analyzedPlies)/\(analysis.totalPlies) decisions saved"
@@ -339,6 +374,11 @@ final class DeviceAnalysisCoordinator {
                 withinDecisionProgress = 0
                 updateSystemProgress()
                 if !analysis.isComplete, let reason = waitingReason(for: job) { mutate(job.id) { $0.message = reason }; successful = false }
+            } catch LocalAnalysisResourceError.insufficientMemory {
+                successful = false
+                mutate(job.id) { $0.state = .queued }
+                handleMemoryPressure()
+                break
             } catch {
                 successful = false
                 if Task.isCancelled {

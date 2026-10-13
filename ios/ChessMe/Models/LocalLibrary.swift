@@ -41,6 +41,7 @@ struct LibrarySnapshot: Codable {
     var cloudSubmissionKeys: [String: UUID]?
     var cloudBatch: CloudBatchRecord?
     var localAnalysisJobs: [LocalAnalysisJob]?
+    var localAnalysisTimings: [LocalAnalysisTiming]?
 }
 
 final class LocalLibrary {

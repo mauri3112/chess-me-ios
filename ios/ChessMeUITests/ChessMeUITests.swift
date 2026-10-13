@@ -699,6 +699,36 @@ final class ChessMeUITests: XCTestCase {
         XCTAssertTrue(app.buttons["localAnalysis.level.maximum"].isSelected)
     }
 
+    func testBaseIPhone15CanSelectEveryDepthAndSeeNightCapacity() throws {
+        app.terminate()
+        app.launchArguments += ["--local-analysis-base-iphone15"]
+        app.launch()
+        openSettings()
+        app.buttons["settings.localAnalysis"].tap()
+        XCTAssertTrue(app.navigationBars["On-device analysis"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.switches["localAnalysis.overnight"].isEnabled)
+        for name in ["balanced", "deep", "maximum"] {
+            let level = app.buttons["localAnalysis.level.\(name)"]
+            for _ in 0..<3 where !level.isHittable { app.swipeUp() }
+            XCTAssertTrue(level.isEnabled, "All depths are available on the 6 GB base iPhone 15")
+            level.tap()
+            XCTAssertTrue(level.isSelected)
+            XCTAssertTrue(app.staticTexts["localAnalysis.capacity.\(name)"].exists)
+        }
+        XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label CONTAINS '8 GB'")).firstMatch.exists)
+        XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label CONTAINS '3 hours'")).firstMatch.exists)
+        XCTAssertEqual(app.staticTexts["localAnalysis.capacity.balanced"].label, "About 9–14 games per night")
+        XCTAssertTrue(app.staticTexts["Initial estimate for a 40-move game"].firstMatch.exists)
+        capture("Base iPhone 15 with all depths and nightly capacity")
+        app.terminate()
+        app.launchArguments.removeAll { $0 == "--reset-local-analysis" }
+        app.launch()
+        openSettings()
+        app.buttons["settings.localAnalysis"].tap()
+        XCTAssertTrue(app.buttons["localAnalysis.level.maximum"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["localAnalysis.level.maximum"].isSelected)
+    }
+
     func testGameReviewKeepsItsQueueWhenNavigatingAway() throws {
         let start = app.buttons["lesson.start"]
         XCTAssertTrue(start.waitForExistence(timeout: 90))

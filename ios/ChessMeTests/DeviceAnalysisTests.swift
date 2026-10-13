@@ -83,5 +83,86 @@ final class DeviceAnalysisTests: XCTestCase {
     func testLibraryFromOlderBuildLoadsWithoutAQueue() throws {
         let legacy = Data("{\"games\":[],\"analyses\":[],\"practice\":[],\"isDemo\":false,\"skippedGames\":0}".utf8)
         XCTAssertNil(try JSONDecoder().decode(LibrarySnapshot.self, from: legacy).localAnalysisJobs)
+        XCTAssertNil(try JSONDecoder().decode(LibrarySnapshot.self, from: legacy).localAnalysisTimings)
+    }
+
+    @MainActor
+    func testDemoCapacityDoesNotExtrapolateFromShortTeachingGames() {
+        let demo = AppModel(previewLibrary: LibrarySnapshot(games: DemoContent.games(), isDemo: true))
+        XCTAssertEqual(demo.nightEstimate(.balanced).minimumGames, 9)
+        XCTAssertEqual(demo.nightEstimate(.balanced).maximumGames, 14)
+        let shortGames = AppModel(previewLibrary: LibrarySnapshot(games: DemoContent.games()))
+        XCTAssertGreaterThan(shortGames.nightEstimate(.balanced).minimumGames, demo.nightEstimate(.balanced).maximumGames)
+    }
+
+    @MainActor
+    func testStockfishQueueWaitsForAppMemoryAndResumesTheSameDepth() async throws {
+        let game = try XCTUnwrap(DemoContent.games().first)
+        var configuration = DeviceEngineConfiguration()
+        configuration.depth = 1; configuration.secondsPerPosition = 1; configuration.searchNodeLimit = 10_000
+        let model = AppModel(previewLibrary: LibrarySnapshot(games: [game], isDemo: true))
+        var headroom = 200
+        let coordinator = DeviceAnalysisCoordinator(model: model, schedulerEnabled: false, availableMemoryMB: { headroom })
+        defer { coordinator.pause() }
+        coordinator.enqueue(games: [game], configuration: configuration, level: .maximum)
+        let waiting = try XCTUnwrap(model.library.localAnalysisJobs?.first)
+        XCTAssertEqual(waiting.state, .queued)
+        XCTAssertEqual(waiting.configuration.depth, configuration.depth)
+        XCTAssertTrue(waiting.message?.contains("memory") == true)
+        XCTAssertFalse(model.isAnalyzing)
+        let completed = expectation(description: "The same queued review resumes after app headroom recovers")
+        let observation = model.$library.filter { $0.localAnalysisJobs?.first?.state == .completed }.prefix(1).sink { _ in completed.fulfill() }
+        defer { observation.cancel() }
+        headroom = 1_024
+        coordinator.sceneChanged(active: true)
+        await fulfillment(of: [completed], timeout: 20)
+        XCTAssertEqual(model.library.localAnalysisJobs?.first?.id, waiting.id)
+        XCTAssertEqual(model.library.localAnalysisJobs?.first?.configuration.depth, configuration.depth)
+    }
+
+    @MainActor
+    func testCompleteDeviceReviewStoresTimingAndLegacyLibrariesStillLoad() async throws {
+        let game = try XCTUnwrap(DemoContent.games().first)
+        var configuration = DeviceEngineConfiguration()
+        configuration.depth = 1; configuration.secondsPerPosition = 1; configuration.searchNodeLimit = 10_000
+        let model = AppModel(previewLibrary: LibrarySnapshot(games: [game]))
+        let completed = expectation(description: "A full review records real active processing time")
+        let observation = model.$library.filter { $0.localAnalysisTimings?.isEmpty == false }.prefix(1).sink { _ in completed.fulfill() }
+        defer { observation.cancel(); model.pauseAnalysis() }
+        model.deviceAnalysis.enqueue(games: [game], configuration: configuration, level: .balanced)
+        await fulfillment(of: [completed], timeout: 20)
+        let sample = try XCTUnwrap(model.library.localAnalysisTimings?.first)
+        let job = try XCTUnwrap(model.library.localAnalysisJobs?.first)
+        XCTAssertEqual(sample.decisions, job.checkpoint?.totalPlies)
+        XCTAssertEqual(job.timedDecisions, sample.decisions)
+        XCTAssertGreaterThan(sample.seconds, 0)
+        let restored = try JSONDecoder().decode(LibrarySnapshot.self, from: JSONEncoder().encode(model.library))
+        XCTAssertEqual(restored.localAnalysisTimings, model.library.localAnalysisTimings)
+    }
+
+    @MainActor
+    func testLegacyUntimedCheckpointResumesWithoutCalibratingFromOnlyItsTail() async throws {
+        let game = try XCTUnwrap(DemoContent.games().first)
+        var configuration = DeviceEngineConfiguration()
+        configuration.depth = 1; configuration.secondsPerPosition = 1; configuration.searchNodeLimit = 10_000; configuration.memoryMB = 64
+        var options = configuration.options
+        options.maximumPositions = 1
+        let checkpoint = try LocalAnalyzer(options: options).analyze(game: game)
+        var job = LocalAnalysisJob(gameID: game.id, configuration: configuration, level: .balanced)
+        job.checkpoint = checkpoint; job.state = .paused
+        let model = AppModel(previewLibrary: LibrarySnapshot(games: [game], localAnalysisJobs: [job]))
+        let completed = expectation(description: "An old checkpoint resumes without discarding saved decisions")
+        let observation = model.$library.filter { $0.localAnalysisJobs?.first?.state == .completed }.prefix(1).sink { _ in completed.fulfill() }
+        defer { observation.cancel(); model.pauseAnalysis() }
+        var smallerCache = configuration
+        smallerCache.memoryMB = 32
+        model.deviceAnalysis.enqueue(games: [game], configuration: smallerCache, level: .balanced)
+        await fulfillment(of: [completed], timeout: 20)
+        let final = try XCTUnwrap(model.library.localAnalysisJobs?.first)
+        XCTAssertEqual(final.id, job.id)
+        XCTAssertEqual(model.library.localAnalysisJobs?.count, 1)
+        XCTAssertEqual(final.configuration.options.configurationID, checkpoint.configurationID)
+        XCTAssertEqual(final.timedDecisions, (final.checkpoint?.totalPlies ?? 0) - checkpoint.analyzedPlies)
+        XCTAssertNil(model.library.localAnalysisTimings)
     }
 }

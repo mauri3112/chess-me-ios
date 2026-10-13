@@ -156,7 +156,7 @@ struct GameDetailView: View {
                 .disabled(model.isImporting || model.cloudIsRunning || !DeviceAnalysisCoordinator.hardware.supportsOvernight || deviceReviewAlreadyActive)
                 .accessibilityIdentifier("game.deepReview")
                 if !DeviceAnalysisCoordinator.hardware.supportsOvernight {
-                    Text("Deep analysis requires iPhone 15 or newer. You can still review this game with the ordinary device engine.").font(.caption)
+                    Text(LocalAnalysisLevel.balanced.requirement).font(.caption)
                     Button("Run an ordinary device review") { analyzer.stop(); model.analyzePending(gameID: game.id) }
                         .disabled(model.isBusy)
                 }

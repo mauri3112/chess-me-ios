@@ -122,10 +122,32 @@ final class AppModel: ObservableObject {
         configuration.engine = .stockfish
         configuration.depth = level.depth
         configuration.secondsPerPosition = level.secondsPerDecision
-        configuration.memoryMB = level.memoryMB
+        configuration.memoryMB = DeviceAnalysisCoordinator.hardware.cacheMegabytes(for: level)
         configuration.searchNodeLimit = level.nodeLimit
-        configuration.engineThreads = 2
+        configuration.engineThreads = DeviceAnalysisCoordinator.hardware.engineThreads
         return configuration
+    }
+    func nightEstimate(_ level: LocalAnalysisLevel) -> LocalAnalysisNightEstimate {
+        // Use recent game lengths so short bullet games and long rapid games
+        // have different capacity estimates without asking the user to choose.
+        let counts: [Double] = isDemo ? [] : windowGames.prefix(20).compactMap { game in
+            guard let document = try? game.mainline(), !document.moves.isEmpty else { return nil }
+            let initialSide = (game.initialFEN ?? document.initialFEN).flatMap { try? ChessPosition(fen: $0).sideToMove } ?? .white
+            let count = document.moves.count / 2 + (document.moves.count % 2 == 1 && initialSide == game.playerSide ? 1 : 0)
+            return count > 0 ? Double(count) : nil
+        }
+        let decisions = counts.isEmpty ? 40 : counts.reduce(0, +) / Double(counts.count)
+        return LocalAnalysisNightEstimate(configuration: deepConfiguration(level), typicalDecisions: decisions,
+                                          hardwareIdentifier: DeviceAnalysisCoordinator.hardware.modelIdentifier,
+                                          engineVersion: StockfishEngine.version, timings: library.localAnalysisTimings ?? [])
+    }
+    func recordLocalAnalysisTiming(_ timing: LocalAnalysisTiming) {
+        guard !isDemo else { return }
+        updateLibrary { snapshot in
+            var timings = snapshot.localAnalysisTimings ?? []
+            timings.append(timing)
+            snapshot.localAnalysisTimings = Array(timings.suffix(60))
+        }
     }
     func analyzeOnDevice(gameID: String) {
         guard !isImporting, !cloudIsRunning, let game = windowGames.first(where: { $0.id == gameID }) else { return }
