@@ -9,7 +9,10 @@ struct RootView: View {
     @EnvironmentObject private var subscriptions: SubscriptionStore
     @EnvironmentObject private var authentication: LichessAuthentication
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @AppStorage(ChessBoardDesign.preferenceKey) private var storedDesign = ChessBoardDesign.classic.rawValue
+    @State private var launching = !ProcessInfo.processInfo.arguments.contains("--ui-testing") || ProcessInfo.processInfo.arguments.contains("--test-launch-animation")
+    @State private var launchDocked = false
 
     var body: some View {
         TabView(selection: $model.selectedTab) {
@@ -34,7 +37,26 @@ struct RootView: View {
             model.resetCloudAccess()
             if let account { model.adoptPuzzleLevel(from: account) }
         }
+        .overlayPreferenceValue(LogoFramePreference.self) { anchors in
+            GeometryReader { geometry in
+                if launching, let anchor = anchors[model.selectedTab] {
+                    AppLaunchAnimation(target: geometry[anchor], size: geometry.size, docked: launchDocked)
+                }
+            }.allowsHitTesting(false)
+        }
         .environment(\.chessBoardDesign, ChessBoardDesign(rawValue: storedDesign) ?? .classic)
+        .environment(\.launchLogoHidden, launching)
+        .environment(\.chessReduceMotion, reduceMotion || ProcessInfo.processInfo.arguments.contains("--reduce-motion"))
+        .task {
+            guard launching else { return }
+            let quiet = reduceMotion || ProcessInfo.processInfo.arguments.contains("--reduce-motion")
+            do {
+                try await Task.sleep(for: .milliseconds(quiet ? 80 : 350))
+                withAnimation(quiet ? .easeOut(duration: 0.18) : .smooth(duration: 0.95)) { launchDocked = true }
+                try await Task.sleep(for: .milliseconds(quiet ? 200 : 980))
+                launching = false
+            } catch { launching = false }
+        }
         .task(id: "\(model.cloudQueueRefreshID):\(scenePhase == .active)") {
             guard scenePhase == .active else { return }
             while !Task.isCancelled {
@@ -56,13 +78,19 @@ private struct LessonDestination: ViewModifier {
 }
 
 struct BrandHeader: View {
+    let title: String
+    let tab: AppTab
     @State private var settings = false
+    @Environment(\.launchLogoHidden) private var hiddenLogo
     var body: some View {
         HStack {
             HStack(spacing: 7) {
                 ChessPieceView(piece: Piece(kind: .rook, side: .black))
-                    .environment(\.chessBoardDesign, .classic).frame(width: 28, height: 28)
-                Text("chess-me").font(ChessMeStyle.title(24))
+                    .environment(\.chessBoardDesign, .classic).frame(width: 32, height: 32)
+                    .opacity(hiddenLogo ? 0 : 1)
+                    .anchorPreference(key: LogoFramePreference.self, value: .bounds) { [tab.rawValue: $0] }
+                    .accessibilityIdentifier("app.logo")
+                Text(title).font(ChessMeStyle.title(30)).accessibilityIdentifier("app.title")
             }
             Spacer()
             Button { settings = true } label: {
@@ -88,6 +116,7 @@ struct SampleNotice: View {
 }
 
 struct ReviewProgressView: View {
+    var showsBulkReviewAction = true
     @EnvironmentObject private var model: AppModel
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -101,7 +130,7 @@ struct ReviewProgressView: View {
                 }
                 if model.isAnalyzing { ProgressView(value: model.progress).tint(ChessMeStyle.green) }
                 else { ProgressView() }
-            } else if model.pendingGames > 0 {
+            } else if showsBulkReviewAction && model.pendingGames > 0 {
                 Button("Review \(model.pendingGames) remaining games") { model.analyzePending() }
                     .font(.subheadline.weight(.semibold)).accessibilityIdentifier("review.resume")
             }
@@ -121,9 +150,8 @@ struct ReviewView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 22) {
-                BrandHeader()
+                BrandHeader(title: "Today", tab: .today)
                 SampleNotice()
-                Text("Today").font(ChessMeStyle.title(32)).foregroundStyle(ChessMeStyle.ink)
                 if model.library.games.isEmpty { welcome }
                 else {
                     nextAction

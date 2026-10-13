@@ -6,9 +6,8 @@ struct PracticeView: View {
     var body: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 22) {
-                BrandHeader()
+                BrandHeader(title: "Practice", tab: .practice)
                 SampleNotice()
-                Text("Practice").font(ChessMeStyle.title(32)).foregroundStyle(ChessMeStyle.ink)
                 PaperCard {
                     VStack(alignment: .leading, spacing: 14) {
                         Text("From your games").font(ChessMeStyle.title(24))

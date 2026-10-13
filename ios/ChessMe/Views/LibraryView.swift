@@ -4,26 +4,34 @@ import ChessMeCore
 struct LibraryView: View {
     @EnvironmentObject private var model: AppModel
     @State private var savedOnly = false
+    @State private var showAnalysisChoices = false
+    @State private var schedule: DeviceAnalysisSchedule?
+    @ScaledMetric(relativeTo: .subheadline) private var periodWidth: CGFloat = 148
     private var games: [ChessGame] { savedOnly ? model.favoriteGames : model.windowGames }
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.chessReduceMotion) private var reduceMotion
     var body: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 20) {
-                BrandHeader()
+                BrandHeader(title: "Games", tab: .games)
                 SampleNotice()
                 HStack {
-                    Text("Games").font(ChessMeStyle.title(32)).foregroundStyle(ChessMeStyle.ink)
+                    Button { showAnalysisChoices = true } label: { Label("Add for analysis", systemImage: "plus.circle.fill") }
+                        .font(.subheadline.weight(.semibold)).frame(minHeight: 44)
+                        .disabled(model.isImporting || model.cloudIsRunning || games.isEmpty)
+                        .accessibilityIdentifier("games.addAnalysis")
                     Spacer()
                     SyncGamesButton(iconOnly: true)
                 }
-                HStack {
-                    if !savedOnly { ReviewPeriodMenu() }
-                    Button { savedOnly.toggle() } label: {
-                        Label("Saved", systemImage: savedOnly ? "heart.fill" : "heart")
+                HStack(spacing: 0) {
+                    ReviewPeriodMenu().frame(width: savedOnly ? 0 : periodWidth, alignment: .leading)
+                        .clipped().opacity(savedOnly ? 0 : 1).disabled(savedOnly).accessibilityHidden(savedOnly)
+                    Button { withAnimation(reduceMotion ? nil : .spring(duration: 0.45, bounce: 0.08)) { savedOnly.toggle() } } label: {
+                        Label("Saved", systemImage: "heart.fill")
                             .font(.subheadline).padding(.horizontal, 14).frame(minHeight: 44)
                             .foregroundStyle(savedOnly ? .white : ChessMeStyle.ink)
                             .background(savedOnly ? ChessMeStyle.green : ChessMeStyle.ink.opacity(0.05), in: Capsule())
-                    }.buttonStyle(.plain).accessibilityIdentifier("games.saved")
+                    }.buttonStyle(.plain).padding(.leading, savedOnly ? 0 : 12).transition(.identity)
+                        .accessibilityIdentifier("games.saved")
                         .accessibilityValue(savedOnly ? "Selected" : "Not selected")
                     Spacer()
                 }
@@ -39,29 +47,27 @@ struct LibraryView: View {
                         HStack(spacing: 15) {
                             ChessPieceView(piece: Piece(kind: .king, side: game.playerSide))
                                 .frame(width: 38, height: 38).frame(width: 48, height: 56)
-                                .background(ChessMeStyle.green.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
+                                .background((model.outcome(for: game)?.color ?? ChessMeStyle.green).opacity(0.09), in: RoundedRectangle(cornerRadius: 12))
                             VStack(alignment: .leading, spacing: 6) {
-                                Text(game.playerSide == .white ? game.black : game.white).font(.subheadline.weight(.semibold))
+                                HStack {
+                                    Text(game.opponent).font(.subheadline.weight(.semibold)).lineLimit(1)
+                                    if let outcome = model.outcome(for: game) { GameOutcomeBadge(outcome: outcome).accessibilityIdentifier("game.result.\(game.id)") }
+                                }
                                 Text(game.playedAt, format: .dateTime.month(.abbreviated).day().hour().minute())
                                     .font(.caption).foregroundStyle(ChessMeStyle.muted)
-                                if let job = model.localAnalysisJob(for: game.id), job.isPending {
-                                    Label(job.state == .running ? "Analyzing on device" : (job.nightOnly ? "Queued for tonight" : "Queued on device"), systemImage: job.state == .running ? "cpu" : "clock")
-                                        .font(.caption2).foregroundStyle(ChessMeStyle.green)
-                                        .symbolEffect(.pulse, isActive: job.state == .running && !reduceMotion)
-                                        .accessibilityIdentifier("library.analysis.\(game.id)")
-                                }
                                 if let analysis = model.gameAnalysis(for: game.id) {
-                                    Text("\(analysis.findings.count) key moments · \(analysis.source == "cloud" ? "cloud" : "on device")\(analysis.isComplete ? "" : " · incomplete")")
+                                    Text("\(analysis.findings.count) key moments")
                                         .font(.caption).foregroundStyle(ChessMeStyle.muted)
-                                } else { Text("Ready to review").font(.caption).foregroundStyle(ChessMeStyle.muted) }
+                                }
                             }
-                            Spacer()
+                            Spacer(minLength: 0)
+                            GameAnalysisIndicator(game: game)
                             Image(systemName: "chevron.right").font(.caption)
                         }.foregroundStyle(ChessMeStyle.ink)
                     }.accessibilityIdentifier("game.open.\(game.id)")
                     Divider()
                 }
-                ReviewProgressView()
+                ReviewProgressView(showsBulkReviewAction: false)
                 if let notice = model.notice { Text(notice).font(.caption).foregroundStyle(ChessMeStyle.muted) }
                 Button { model.showConnection = true } label: { Label("Manage connection & imports", systemImage: "link") }
                     .font(.subheadline).frame(minHeight: 44).accessibilityIdentifier("games.connection")
@@ -70,5 +76,10 @@ struct LibraryView: View {
             }.padding(24)
         }.background(ChessMeStyle.paper).toolbar(.hidden, for: .navigationBar)
             .accessibilityIdentifier("games.scroll")
+            .confirmationDialog("Add for analysis", isPresented: $showAnalysisChoices, titleVisibility: .visible) {
+                Button("Queue for night analysis") { schedule = .night }.accessibilityIdentifier("games.queueNight")
+                Button("Queue to analyze now") { schedule = .now }.accessibilityIdentifier("games.queueNow")
+            }
+            .sheet(item: $schedule) { mode in GameAnalysisSelectionView(schedule: mode, games: games) }
     }
 }

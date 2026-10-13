@@ -64,13 +64,22 @@ extension EnvironmentValues {
 
 struct ChessPieceView: View {
     let piece: Piece
+    var tint: Color?
     @Environment(\.chessBoardDesign) private var design
 
-    var body: some View {
+    private var artwork: some View {
         Image(design.assetName(for: piece))
             .renderingMode(.original)
             .resizable()
             .aspectRatio(1, contentMode: .fit)
             .accessibilityHidden(true)
+    }
+    var body: some View {
+        Group {
+            if let tint {
+                if piece.side == .white { artwork.colorMultiply(tint) }
+                else { artwork.overlay { Rectangle().fill(tint).blendMode(BlendMode.screen) }.mask(artwork).compositingGroup() }
+            } else { artwork }
+        }.accessibilityHidden(true)
     }
 }

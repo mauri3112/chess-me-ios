@@ -32,6 +32,19 @@ public enum ReviewWindow: String, Codable, CaseIterable, Identifiable, Sendable 
     public func contains(_ date: Date, now: Date = Date()) -> Bool { date >= since(now: now) && date <= now }
 }
 
+public enum GameResult: String, Codable, Sendable {
+    case whiteWin = "1-0", blackWin = "0-1", draw = "1/2-1/2"
+    public func outcome(for side: Side) -> PlayerGameOutcome {
+        switch self {
+        case .draw: return .draw
+        case .whiteWin: return side == .white ? .won : .lost
+        case .blackWin: return side == .black ? .won : .lost
+        }
+    }
+}
+
+public enum PlayerGameOutcome: String, Sendable { case won, lost, draw }
+
 public struct ChessGame: Codable, Identifiable, Equatable, Sendable {
     public let id: String
     public let username: String
@@ -47,17 +60,33 @@ public struct ChessGame: Codable, Identifiable, Equatable, Sendable {
     public let clockData: GameClockData?
     /// A successful export can legitimately have no clocks. Do not keep fetching it.
     public let clockDataFetchedAt: Date?
+    public let result: GameResult?
 
     public init(id: String, username: String, white: String, black: String, playedAt: Date,
                 playerSide: Side, moves: String, pgn: String? = nil, initialFEN: String? = nil,
-                status: String = "mate", clockData: GameClockData? = nil, clockDataFetchedAt: Date? = nil) {
+                status: String = "mate", clockData: GameClockData? = nil, clockDataFetchedAt: Date? = nil, result: GameResult? = nil) {
         self.id = id; self.username = username; self.white = white; self.black = black
         self.playedAt = playedAt; self.playerSide = playerSide; self.moves = moves
         self.pgn = pgn; self.initialFEN = initialFEN; self.status = status
         self.clockData = clockData; self.clockDataFetchedAt = clockDataFetchedAt
+        self.result = result
     }
 
     public var label: String { "\(white) vs \(black)" }
+    public var opponent: String { playerSide == .white ? black : white }
+    public var reviewLabel: String { "You vs \(opponent)" }
+    public var finishedResult: GameResult? {
+        guard isFinished else { return nil }
+        if let result { return result }
+        if let pgn, let document = try? PGNDocument(pgn), let value = document.result,
+           let result = GameResult(rawValue: value) { return result }
+        if ["draw", "stalemate"].contains(status) { return .draw }
+        if status == "mate", let replay = try? GameReplay(game: self), let outcome = replay.positions.last?.outcome(),
+           case .checkmate(let winner) = outcome {
+            return winner == .white ? .whiteWin : .blackWin
+        }
+        return nil
+    }
     public var url: URL? { id.hasPrefix("demo-") || id.hasPrefix("pgn-") ? nil : URL(string: "https://lichess.org/\(id)") }
     public var isFinished: Bool { !["created", "started", "aborted"].contains(status) }
     public func mainline() throws -> PGNDocument { try PGNDocument(moves.isEmpty ? (pgn ?? "") : moves) }
@@ -66,7 +95,12 @@ public struct ChessGame: Codable, Identifiable, Equatable, Sendable {
     }
     public func withClockData(_ data: GameClockData?, fetchedAt: Date) -> ChessGame {
         ChessGame(id: id, username: username, white: white, black: black, playedAt: playedAt, playerSide: playerSide,
-                  moves: moves, pgn: pgn, initialFEN: initialFEN, status: status, clockData: data, clockDataFetchedAt: fetchedAt)
+                  moves: moves, pgn: pgn, initialFEN: initialFEN, status: status, clockData: data, clockDataFetchedAt: fetchedAt, result: result)
+    }
+    public func withResult(_ value: GameResult?) -> ChessGame {
+        ChessGame(id: id, username: username, white: white, black: black, playedAt: playedAt, playerSide: playerSide,
+                  moves: moves, pgn: pgn, initialFEN: initialFEN, status: status, clockData: clockData,
+                  clockDataFetchedAt: clockDataFetchedAt, result: value)
     }
 }
 

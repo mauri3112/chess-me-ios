@@ -19,6 +19,8 @@ struct AnalysisBoardView: View {
     var moveMarker: BoardMoveMarker?
     var suggestions: [PracticeMoveSuggestion] = []
     var rejectionCount = 0
+    var successCount = 0
+    var successSquare: Int?
     var evaluation: PositionEvaluation?
     var evaluationPosition: ChessPosition?
     var topMoves = 2
@@ -76,7 +78,8 @@ struct AnalysisBoardView: View {
             }
             ChessBoardView(position: position, perspective: perspective, selectedSquare: selectedSquare,
                            targets: targets, highlightedSquares: highlightedSquares, arrows: arrows, moveMarker: moveMarker,
-                           suggestions: suggestions, rejectionCount: rejectionCount, onSquare: onSquare)
+                           suggestions: suggestions, rejectionCount: rejectionCount,
+                           successCount: successCount, successSquare: successSquare, onSquare: onSquare)
         }
         .aspectRatio(showEvaluationBar ? 1.11 : 1, contentMode: .fit)
         .onChange(of: evaluationPosition ?? position, initial: true) { _, value in

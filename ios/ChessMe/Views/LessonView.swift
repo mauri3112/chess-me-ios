@@ -40,7 +40,7 @@ struct LessonView: View {
     let finding: MoveFinding
     @EnvironmentObject private var model: AppModel
     @Environment(\.scenePhase) private var scenePhase
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.chessReduceMotion) private var reduceMotion
     @ScaledMetric(relativeTo: .subheadline) private var statusHeight: CGFloat = 62
     @State private var guidance = false
     @StateObject private var analyzer = PositionAnalysisController()
@@ -57,6 +57,7 @@ struct LessonView: View {
     @State private var exploring = false
     @State private var continuing = false
     @State private var explorationStart: ChessPosition?
+    @State private var explorationBase: MoveHistory?
     @State private var explorationStartMoves: [ChessMove] = []
     @State private var explorationStartLastMove: ChessMove?
     @State private var explorationHistory: [ChessPosition] = []
@@ -86,10 +87,10 @@ struct LessonView: View {
     private var initial: ChessPosition { (try? ChessPosition(fen: finding.positionFEN)) ?? .initial }
     private var targets: Set<Int> {
         guard let selected else { return [] }
-        return Set(position.legalMoves().filter { $0.from == selected }.map(\.to))
+        return Set(shownPosition.legalMoves().filter { $0.from == selected }.map(\.to))
     }
     private var history: MoveHistory {
-        let base = gameHistory ?? MoveHistory(position: initial)
+        let base = (exploring ? explorationBase : gameHistory) ?? MoveHistory(position: initial)
         return (try? base.appending(exploring ? explorationMoves : lessonMoves)) ?? base
     }
     private var shownPosition: ChessPosition {
@@ -97,7 +98,7 @@ struct LessonView: View {
         if comparingMoves { return initial }
         return motion.position ?? position
     }
-    private var analysisVisible: Bool { !motion.isAnimating && !evaluatingChoices && browsingPly == nil && (guidance || solved || exploring) }
+    private var analysisVisible: Bool { !motion.isAnimating && !evaluatingChoices && (guidance || solved || exploring || browsingPly != nil) }
     private var reviewingDecision: Bool {
         !exploring && !viewingOriginal && browsingPly == nil &&
         (comparingMoves || position == initial || (solved && lessonMoves.count == 1))
@@ -108,21 +109,23 @@ struct LessonView: View {
         return analyzer.evaluation(for: analysisPosition)
     }
     private var nextLineMove: ChessMove? {
-        let moves = exploring ? explorationMoves : lessonMoves
-        guard Array(activeLine.prefix(moves.count)) == moves, activeLine.indices.contains(moves.count),
-              position.legalMoves().contains(activeLine[moves.count]) else { return nil }
-        return activeLine[moves.count]
+        let index = browsingPly ?? history.moves.count
+        let base = gameHistory ?? MoveHistory(position: initial)
+        guard index >= base.moves.count,
+              Array(history.moves.prefix(base.moves.count)) == base.moves else { return nil }
+        let played = Array(history.moves.prefix(index).dropFirst(base.moves.count))
+        guard played == Array(activeLine.prefix(played.count)), activeLine.indices.contains(played.count),
+              shownPosition.legalMoves().contains(activeLine[played.count]) else { return nil }
+        return activeLine[played.count]
     }
     private var liveChoices: [PracticeMoveSuggestion] {
-        guard exploring, browsingPly == nil, !motion.isAnimating else { return [] }
-        let suggestions = analyzer.evaluation(for: position)?.goodMoves(in: position) ?? []
+        guard exploring || browsingPly != nil, !motion.isAnimating else { return [] }
+        let suggestions = analyzer.evaluation(for: shownPosition)?.goodMoves(in: shownPosition) ?? []
         if !suggestions.isEmpty { return suggestions }
-        if continuing, let nextLineMove { return [PracticeMoveSuggestion(move: nextLineMove, quality: .best)] }
+        if let nextLineMove { return [PracticeMoveSuggestion(move: nextLineMove, quality: .best)] }
         return []
     }
-    private var nextExplorationMove: ChessMove? {
-        liveChoices.first?.move ?? (continuing ? nextLineMove : nil)
-    }
+    private var nextExplorationMove: ChessMove? { liveChoices.first?.move ?? nextLineMove }
     private var choices: [PracticeMoveSuggestion] {
         guard hasAttempted else { return [] }
         if let decisionEvaluation {
@@ -135,7 +138,7 @@ struct LessonView: View {
         }
     }
     private var boardChoices: [PracticeMoveSuggestion] {
-        if exploring { return liveChoices }
+        if exploring || browsingPly != nil { return liveChoices }
         guard browsingPly == nil, !exploring, !viewingOriginal, !motion.isAnimating,
               comparingMoves || position == initial || (solved && lessonMoves.count == 1) else { return [] }
         return choices
@@ -166,13 +169,21 @@ struct LessonView: View {
                     FavoriteButton(selected: model.isFavorite(finding)) { model.toggleFavorite(finding) }
                 }
                 AnalysisBoardView(position: shownPosition, perspective: initial.sideToMove, selectedSquare: selected,
-                                  targets: browsingPly == nil && !motion.isAnimating && !comparingMoves ? targets : [], highlightedSquares: shownMove.map { [$0.from, $0.to] } ?? [],
+                                  targets: !motion.isAnimating && !comparingMoves ? targets : [], highlightedSquares: shownMove.map { [$0.from, $0.to] } ?? [],
                                   moveMarker: marker, suggestions: boardChoices, rejectionCount: motion.rejectionCount,
+                                  successCount: motion.successCount, successSquare: motion.successSquare,
                                   evaluation: analysisVisible ? currentEvaluation : nil, evaluationPosition: analysisPosition,
                                   topMoves: model.effectiveEngineConfiguration.topMoves,
                                   fallbackMove: analysisVisible && position == initial ? finding.bestMove : nil,
-                                  showArrows: analysisVisible && boardChoices.isEmpty, revealEvaluation: analysisVisible,
-                                  onSquare: browsingPly == nil && !motion.isAnimating && !comparingMoves && (exploring || (!solved && !viewingOriginal)) ? chooseSquare : nil)
+                                  showArrows: false, revealEvaluation: analysisVisible,
+                                  onSquare: !motion.isAnimating && !comparingMoves && (exploring || browsingPly != nil || (!solved && !viewingOriginal)) ? chooseSquare : nil)
+                MoveHistoryView(history: history, selectedIndex: browsingPly ?? history.moves.count, prefix: "lesson", title: nil) { index in
+                    guard !motion.isAnimating else { return }
+                    selected = nil
+                    comparingMoves = false
+                    if index != history.moves.count { assistanceUsed = true }
+                    browsingPly = index == history.moves.count ? nil : index
+                }
                 lessonStatus
                 if !solved && !exploring && browsingPly == nil && !viewingOriginal {
                     HStack {
@@ -186,9 +197,9 @@ struct LessonView: View {
                     PrimaryButton(title: "Play the continuation", symbol: "play.fill") { startContinuation() }
                         .accessibilityIdentifier("lesson.continuation")
                 }
-                if continuing && browsingPly == nil {
+                if continuing || exploring || browsingPly != nil {
                     PrimaryButton(title: "Play best move", symbol: "forward.frame") {
-                        if let move = nextExplorationMove { play(move) }
+                        if let move = nextExplorationMove { play(move, automated: true) }
                     }.disabled(nextExplorationMove == nil || motion.isAnimating)
                         .accessibilityIdentifier("lesson.playBestMove")
                 }
@@ -197,29 +208,18 @@ struct LessonView: View {
                 } else if exploring && !liveChoices.isEmpty {
                     MoveChoiceLegend(suggestions: liveChoices, comparing: $comparingMoves, allowsComparison: false)
                 }
-                MoveHistoryView(history: history, selectedIndex: browsingPly ?? history.moves.count, prefix: "lesson", title: nil) { index in
-                    guard !motion.isAnimating else { return }
-                    selected = nil
-                    comparingMoves = false
-                    browsingPly = index == history.moves.count ? nil : index
-                }
-                if browsingPly != nil {
-                    Button("Return to lesson") { browsingPly = nil }.font(.subheadline.weight(.semibold))
-                        .accessibilityIdentifier("lesson.return")
-                }
-                HStack {
-                    if !solved && !exploring {
-                        Button { guidance.toggle() } label: {
-                            Text(guidance ? "Hide analysis" : "Analyze position").frame(minHeight: 44)
+                if !exploring && browsingPly == nil {
+                    HStack {
+                        if !solved {
+                            Button { guidance.toggle() } label: {
+                                Text(guidance ? "Hide analysis" : "Analyze position").frame(minHeight: 44)
+                            }.accessibilityIdentifier("lesson.guidance")
                         }
-                            .accessibilityIdentifier("lesson.guidance")
-                    }
-                    Spacer()
-                    Button { toggleExploration() } label: {
-                        Text(exploring ? "Back to lesson" : "Explore moves").frame(minHeight: 44)
-                    }
-                        .accessibilityIdentifier("lesson.explore")
-                }.font(.caption.weight(.semibold)).disabled(checkingMove || motion.isAnimating || browsingPly != nil)
+                        Spacer()
+                        Button("Explore moves") { enterExploration() }.frame(minHeight: 44)
+                            .accessibilityIdentifier("lesson.explore")
+                    }.font(.caption.weight(.semibold)).disabled(checkingMove || motion.isAnimating)
+                }
                 if analysisVisible {
                     if reviewingDecision {
                         Text("Evaluation of the lesson position").font(.caption2).foregroundStyle(ChessMeStyle.muted)
@@ -227,20 +227,18 @@ struct LessonView: View {
                     AnalysisPanel(position: analysisPosition, controller: analyzer, configuration: model.effectiveEngineConfiguration,
                                   referenceEvaluation: reviewingDecision ? decisionEvaluation : nil)
                 }
-                if browsingPly != nil {
-                    Text("Browse the earlier moves, then return to keep solving this position.").font(.caption).foregroundStyle(ChessMeStyle.muted)
-                } else if exploring {
+                if exploring {
                     HStack {
                         Button("Undo move") {
                             if let previous = explorationHistory.popLast() {
-                                position = previous; selected = nil; explorationMoves.removeLast()
+                                position = previous; selected = nil; browsingPly = nil; explorationMoves.removeLast()
                                 lastMove = explorationMoves.last ?? explorationStartLastMove
                             }
                         }.disabled(explorationHistory.isEmpty).accessibilityIdentifier("lesson.undo")
                         Spacer()
                         Button("Reset position") {
                             position = explorationStart ?? initial; explorationHistory = []; explorationMoves = explorationStartMoves
-                            lastMove = explorationStartLastMove; selected = nil
+                            lastMove = explorationStartLastMove; selected = nil; browsingPly = nil
                         }.accessibilityIdentifier("lesson.reset")
                     }.font(.subheadline.weight(.medium))
                 } else {
@@ -315,9 +313,7 @@ struct LessonView: View {
 
     private var lessonStatus: some View {
         VStack(alignment: .leading, spacing: 5) {
-            if browsingPly != nil {
-                Text("Return to the lesson to keep playing.").foregroundStyle(ChessMeStyle.muted)
-            } else if exploring {
+            if exploring || browsingPly != nil {
                 Text(continuing ? "Play the continuation yourself." : "Try any legal move.").fontWeight(.semibold)
                 Text("Best moves are dark green. Other good moves are lighter.").font(.caption).foregroundStyle(ChessMeStyle.muted)
             } else if solved {
@@ -345,27 +341,37 @@ struct LessonView: View {
     private func updateAnalysis() {
         guard analysisVisible, !evaluatingChoices else { analyzer.stop(); return }
         if reviewingDecision && decisionEvaluation != nil { analyzer.stop(); return }
-        let past = Array(history.positions.dropLast()).map(\.repetitionKey)
+        let past = Array(history.positions.prefix(browsingPly ?? history.moves.count)).map(\.repetitionKey)
         analyzer.start(position: analysisPosition, history: reviewingDecision ? Array((gameHistory?.positions ?? []).dropLast()).map(\.repetitionKey) : past,
                        configuration: model.effectiveEngineConfiguration)
     }
     private func chooseSquare(_ square: Int) {
         if selected == square { selected = nil; return }
         if let selected {
-            let moves = position.legalMoves().filter { $0.from == selected && $0.to == square }
+            let moves = shownPosition.legalMoves().filter { $0.from == selected && $0.to == square }
             if moves.count > 1 { promotionMoves = moves; return }
             if let move = moves.first { play(move); return }
         }
-        selected = position.squares[square]?.side == position.sideToMove ? square : nil
+        selected = shownPosition.squares[square]?.side == shownPosition.sideToMove ? square : nil
     }
-    private func play(_ move: ChessMove) {
+    private func play(_ move: ChessMove, automated: Bool = false) {
+        if automated { assistanceUsed = true }
+        if browsingPly != nil { enterExploration() }
         attemptTask?.cancel()
         motion.stop()
         evaluatingChoices = false
         checkingMove = false
         selected = nil
         guard let next = try? position.applying(move) else { return }
-        if exploring { explorationHistory.append(position); explorationMoves.append(move); position = next; lastMove = move; return }
+        if exploring {
+            let before = position
+            if !solved, before == initial, finding.acceptedMoves.contains(move.uci) || move.uci == finding.bestMove {
+                hasAttempted = true
+                finishAttempt(move, next: next, assessment: nil, celebrate: !automated)
+            }
+            explorationHistory.append(before); explorationMoves.append(move); position = next; lastMove = move
+            return
+        }
         hasAttempted = true
         decisionEvaluation = nil
         comparingMoves = false
@@ -396,7 +402,7 @@ struct LessonView: View {
             updateAnalysis()
         }
     }
-    private func finishAttempt(_ move: ChessMove, next: ChessPosition, assessment: MoveAssessment?, shake: Bool = true) {
+    private func finishAttempt(_ move: ChessMove, next: ChessPosition, assessment: MoveAssessment?, shake: Bool = true, celebrate: Bool = true) {
         attemptedQuality = assessment?.quality
         let comparable = (assessment?.centipawnLoss ?? Int.max) <= 35 && (assessment?.completedDepth ?? 0) >= 2
         guard finding.acceptedMoves.contains(move.uci) || finding.bestMove == move.uci || comparable else {
@@ -413,6 +419,7 @@ struct LessonView: View {
         solved = true
         solvedMove = move
         successText = PracticeFeedback.success()
+        if celebrate { motion.celebrate(at: move.to) }
         attemptedQuality = assessment?.quality ?? (move.uci == finding.bestMove ? .best : .excellent)
         feedback = nil
         if !recorded { model.recordPractice(finding, correct: true, assisted: assistanceUsed || showHint); recorded = true }
@@ -428,18 +435,22 @@ struct LessonView: View {
         if !recorded { model.recordPractice(finding, correct: false); recorded = true }
         feedback = "The suggested move is \((try? initial.san(ChessMove(uci: finding.bestMove))) ?? finding.bestMove)."
     }
-    private func startContinuation() {
+    private func startContinuation() { enterExploration() }
+
+    private func enterExploration() {
+        let selectedHistory = history
+        let index = browsingPly ?? selectedHistory.moves.count
         attemptTask?.cancel(); evaluatingChoices = false; checkingMove = false
-        analyzer.stop()
-        comparingMoves = false
-        continuing = true
-        exploring = true
-        selected = nil
-        explorationStart = position
-        explorationStartMoves = lessonMoves
-        explorationStartLastMove = lastMove
-        explorationHistory = []
-        explorationMoves = lessonMoves
+        motion.stop(); analyzer.stop()
+        assistanceUsed = true
+        comparingMoves = false; viewingOriginal = false
+        exploring = true; continuing = true; selected = nil
+        explorationBase = selectedHistory.prefix(through: index)
+        position = explorationBase?.positions.last ?? initial
+        explorationStart = position; explorationStartMoves = []
+        explorationStartLastMove = index > 0 ? selectedHistory.moves[index - 1] : nil
+        explorationHistory = []; explorationMoves = []; lastMove = explorationStartLastMove
+        browsingPly = nil
         updateAnalysis()
     }
     private func compareOriginal() {
@@ -447,26 +458,5 @@ struct LessonView: View {
         viewingOriginal.toggle()
         let uci = viewingOriginal ? finding.playedMove : (solvedMove?.uci ?? finding.bestMove)
         if let move = try? ChessMove(uci: uci), let next = try? initial.applying(move) { position = next; lastMove = move; lessonMoves = [move] }
-    }
-    private func toggleExploration() {
-        attemptTask?.cancel(); evaluatingChoices = false; checkingMove = false
-        analyzer.stop()
-        comparingMoves = false
-        exploring.toggle()
-        continuing = false
-        selected = nil
-        explorationHistory = []
-        explorationMoves = []
-        lastMove = nil
-        if exploring {
-            assistanceUsed = true; position = initial
-            explorationStart = initial; explorationStartMoves = []; explorationStartLastMove = nil
-        }
-        else {
-            position = initial
-            viewingOriginal = false
-            if solved, let move = solvedMove, let next = try? initial.applying(move) { position = next; lastMove = move; lessonMoves = [move] }
-        }
-        updateAnalysis()
     }
 }

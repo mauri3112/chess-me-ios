@@ -8,6 +8,7 @@ import CryptoKit
 final class AppModel: ObservableObject {
     @Published private(set) var library = LibrarySnapshot()
     private var openingLines: [String: (game: ChessGame, line: OpeningLine?)] = [:]
+    private var gameOutcomes: [String: (game: ChessGame, outcome: PlayerGameOutcome?)] = [:]
     private var openingReviews: [String: (game: ChessGame, original: GameAnalysis, annotated: GameAnalysis)] = [:]
     @Published var selectedWindow: ReviewWindow = .day
     @Published var reviewCutoff = Date()
@@ -162,8 +163,24 @@ final class AppModel: ObservableObject {
             deviceAnalysis.enqueue(games: [game], configuration: deepConfiguration(level), level: level, requiresPro: selectedWindow != .day)
         }
     }
-    func localAnalysisJob(for gameID: String) -> LocalAnalysisJob? {
-        let jobs = (library.localAnalysisJobs ?? []).filter { $0.gameID == gameID && $0.level != nil }
+    func outcome(for game: ChessGame) -> PlayerGameOutcome? {
+        if let saved = gameOutcomes[game.id], saved.game == game { return saved.outcome }
+        let result = game.finishedResult?.outcome(for: game.playerSide)
+        gameOutcomes[game.id] = (game, result)
+        return result
+    }
+    @discardableResult
+    func queueForAnalysis(gameIDs: Set<String>, schedule: DeviceAnalysisSchedule) -> Bool {
+        guard !gameIDs.isEmpty, !isImporting, !cloudIsRunning, canSaveLibrary else { return false }
+        guard selectedWindow == .day || subscriptions.isPro else { showPaywall = true; return false }
+        let selected = windowGames.filter { gameIDs.contains($0.id) && $0.isFinished }
+        guard selected.count == gameIDs.count else { notice = "Choose games in your selected review period."; return false }
+        let level = DeviceAnalysisCoordinator.hardware.bounded(overnightSettings.level)
+        return deviceAnalysis.enqueue(games: selected, configuration: deepConfiguration(level), level: level,
+                                      nightOnly: schedule == .night, requiresPro: selectedWindow != .day, scheduledByUser: true)
+    }
+    func localAnalysisJob(for gameID: String, includingOrdinary: Bool = false) -> LocalAnalysisJob? {
+        let jobs = (library.localAnalysisJobs ?? []).filter { $0.gameID == gameID && (includingOrdinary || $0.level != nil) }
         return jobs.last { $0.state == .running }
             ?? jobs.last { $0.isPending && !$0.nightOnly }
             ?? jobs.last { $0.isPending }
@@ -607,7 +624,7 @@ final class AppModel: ObservableObject {
 
     func deleteLocalData() {
         guard !isBusy else { notice = "Pause analysis before deleting your library."; return }
-        defer { openingLines.removeAll(); openingReviews.removeAll() }
+        defer { openingLines.removeAll(); openingReviews.removeAll(); gameOutcomes.removeAll() }
         deviceAnalysis.clear()
         cancelPuzzleMatches(); endSession(); resetCloudAccess()
         syncMessage = nil
@@ -684,7 +701,7 @@ final class AppModel: ObservableObject {
         guard let started = formatter.date(from: dateString) else { throw ImportFailure.missingDate }
         guard selectedWindow.contains(started, now: Date()) else { throw ImportFailure.outsideWindow }
         let id = "pgn-" + SHA256.hash(data: Data(text.utf8)).map { String(format: "%02x", $0) }.joined()
-        let game = ChessGame(id: id, username: name, white: white, black: black, playedAt: started, playerSide: side, moves: document.moves.joined(separator: " "), pgn: text, initialFEN: document.initialFEN, status: result == "1/2-1/2" ? "draw" : "resign", clockData: document.clockData)
+        let game = ChessGame(id: id, username: name, white: white, black: black, playedAt: started, playerSide: side, moves: document.moves.joined(separator: " "), pgn: text, initialFEN: document.initialFEN, status: result == "1/2-1/2" ? "draw" : "resign", clockData: document.clockData, result: GameResult(rawValue: result))
         if library.isDemo { library = libraryBeforeDemo ?? LibrarySnapshot(); libraryBeforeDemo = nil }
         library.games.removeAll { $0.id == id }
         library.games.append(game)
@@ -716,7 +733,9 @@ final class AppModel: ObservableObject {
         guard !games.isEmpty else { return }
         if library.isDemo { library = libraryBeforeDemo ?? LibrarySnapshot(); libraryBeforeDemo = nil }
         var merged = Dictionary(uniqueKeysWithValues: library.games.map { ($0.id, $0) })
-        for game in games {
+        for incoming in games {
+            let game = incoming.result == nil && merged[incoming.id]?.hasSameMainline(as: incoming) == true
+                ? incoming.withResult(merged[incoming.id]?.result) : incoming
             if let previous = merged[game.id], !previous.hasSameMainline(as: game) {
                 library.analyses.removeAll { $0.gameID == game.id }
                 library.puzzleRecommendations?.removeAll { $0.gameID == game.id }
@@ -746,6 +765,7 @@ final class AppModel: ObservableObject {
               library.games[index].username == game.username, library.games[index].hasSameMainline(as: exported),
               library.games[index].clockDataFetchedAt == nil else { return }
         library.games[index] = library.games[index].withClockData(exported.clockData, fetchedAt: Date())
+            .withResult(exported.result ?? exported.finishedResult ?? library.games[index].result)
         guard persist() else { throw LichessError.invalidResponse }
     }
 

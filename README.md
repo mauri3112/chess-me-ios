@@ -1,6 +1,6 @@
 # ChessMe iOS source
 
-Corresponding client source for ChessMe 0.2.0 build 19, tag `ios-0.2.0-build19`.
+Corresponding client source for ChessMe 0.2.0 build 20, tag `ios-0.2.0-build20`.
 The original iOS app and shared core use GNU GPL version 3 only. See LICENSE and
 CLIENT-LICENSE.md. Third-party notices and compatible licences remain intact.
 The cloud backend is separately operated and is not included here.
@@ -45,6 +45,13 @@ achieved depth and save completed decisions. User-started work requests continue
 processing on iOS 26 or later; overnight jobs run while charging between 22:00
 and 07:00 when iOS grants processing time. System interruption, force quitting,
 Low Power Mode, thermal state and memory pressure can delay completion.
+
+Games > Add for analysis lets users choose night or immediate device analysis,
+select individual games and save the selection. Explicit night selections remain
+queued when automatic overnight queuing is disabled. Row icons distinguish
+unreviewed games, night jobs, waiting jobs, active progress and completed reviews.
+Recorded results determine win/loss colors; engine evaluations never infer a
+winner. Practice browsing and trial branches keep the original game intact.
 
 The public repository publishes source only. The requested binary distribution
 is internal TestFlight. There is no warranty. The source-manifest.json file

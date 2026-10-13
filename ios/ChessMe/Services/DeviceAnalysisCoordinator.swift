@@ -67,10 +67,11 @@ final class DeviceAnalysisCoordinator {
         #endif
     }
 
+    @discardableResult
     func enqueue(games: [ChessGame], configuration: DeviceEngineConfiguration, level: LocalAnalysisLevel? = nil,
-                 nightOnly: Bool = false, requiresPro: Bool = false) {
-        guard let model, model.canSaveLibrary else { return }
-        if let level, !Self.hardware.supports(level) { model.notice = level.requirement; return }
+                 nightOnly: Bool = false, requiresPro: Bool = false, scheduledByUser: Bool = false) -> Bool {
+        guard let model, model.canSaveLibrary else { return false }
+        if let level, !Self.hardware.supports(level) { model.notice = level.requirement; return false }
         let completed = Dictionary(games.compactMap { game in
             model.completeDeviceReview(for: game.id, covering: configuration).map { (game.id, $0) }
         }, uniquingKeysWith: { first, _ in first })
@@ -79,6 +80,12 @@ final class DeviceAnalysisCoordinator {
             for game in games where game.isFinished {
                 let signature = configuration.options.configurationID
                 if let existing = jobs.firstIndex(where: { $0.gameID == game.id && $0.matches(configuration: configuration, level: level) }) {
+                    if scheduledByUser && jobs[existing].state != .completed {
+                        jobs[existing].nightOnly = nightOnly
+                        jobs[existing].scheduledByUser = true
+                        jobs[existing].requiresPro = requiresPro
+                        if [.paused, .failed].contains(jobs[existing].state) { jobs[existing].state = .queued; jobs[existing].message = nil }
+                    }
                     if let ready = completed[game.id] {
                         jobs[existing].checkpoint = ready; jobs[existing].state = .completed; jobs[existing].message = "Review ready"
                     }
@@ -94,13 +101,14 @@ final class DeviceAnalysisCoordinator {
                     $0.engineVersion == LocalAnalyzer(options: configuration.options).engineVersion
                 }
                 var job = LocalAnalysisJob(gameID: game.id, configuration: configuration, level: level, nightOnly: nightOnly, requiresPro: requiresPro)
+                job.scheduledByUser = scheduledByUser
                 job.checkpoint = alreadyReviewed
                 if alreadyReviewed?.isComplete == true { job.state = .completed; job.message = "Review ready" }
                 jobs.append(job)
             }
             snapshot.localAnalysisJobs = jobs
         }
-        guard model.persist() else { return }
+        guard model.persist() else { return false }
         if !nightOnly, continuedIdentifier != nil {
             systemJobIDs.formUnion((model.library.localAnalysisJobs ?? []).filter { $0.isPending && !$0.nightOnly }.map(\.id))
         }
@@ -114,7 +122,8 @@ final class DeviceAnalysisCoordinator {
                 }
             } else { startUserWork() }
         }
-        else if isActive { start() }
+        else if isActive { conditionsChanged() }
+        return true
     }
 
     func preferencesChanged() {
@@ -124,17 +133,17 @@ final class DeviceAnalysisCoordinator {
             guard Self.hardware.supports(level) else { model.notice = LocalAnalysisLevel.balanced.requirement; return }
             let configuration = model.deepConfiguration(level)
             if let activeJobID, let current = model.library.localAnalysisJobs?.first(where: { $0.id == activeJobID }),
-               current.nightOnly && !current.matches(configuration: configuration, level: level) { worker?.cancel() }
+               current.nightOnly && current.scheduledByUser != true && !current.matches(configuration: configuration, level: level) { worker?.cancel() }
             model.updateLibrary { snapshot in
-                snapshot.localAnalysisJobs?.removeAll { $0.nightOnly && $0.state != .completed && !$0.matches(configuration: configuration, level: level) }
+                snapshot.localAnalysisJobs?.removeAll { $0.nightOnly && $0.scheduledByUser != true && $0.state != .completed && !$0.matches(configuration: configuration, level: level) }
             }
             enqueue(games: model.windowGames, configuration: configuration, level: level,
                     nightOnly: true, requiresPro: model.selectedWindow != .day)
         } else {
-            if let activeJobID, model.library.localAnalysisJobs?.first(where: { $0.id == activeJobID })?.nightOnly == true {
+            if let activeJobID, model.library.localAnalysisJobs?.first(where: { $0.id == activeJobID }).map({ $0.nightOnly && $0.scheduledByUser != true }) == true {
                 worker?.cancel()
             }
-            model.updateLibrary { $0.localAnalysisJobs?.removeAll { $0.nightOnly && $0.state != .completed } }
+            model.updateLibrary { $0.localAnalysisJobs?.removeAll { $0.nightOnly && $0.scheduledByUser != true && $0.state != .completed } }
             _ = model.persist()
             scheduleOvernight()
         }
@@ -237,7 +246,7 @@ final class DeviceAnalysisCoordinator {
         if ProcessInfo.processInfo.thermalState == .serious || ProcessInfo.processInfo.thermalState == .critical { return "Waiting for your device to cool down." }
         if job.level != nil && ProcessInfo.processInfo.isLowPowerModeEnabled { return "Waiting for Low Power Mode to turn off." }
         if job.nightOnly {
-            guard model.overnightSettings.enabled else { return "Overnight analysis is off." }
+            guard job.scheduledByUser == true || model.overnightSettings.enabled else { return "Overnight analysis is off." }
             guard OvernightAnalysisSettings.isNight(Date()) else { return "Waiting for tonight, after 10 pm." }
             guard [.charging, .full].contains(UIDevice.current.batteryState) else { return "Waiting for charging." }
             if #available(iOS 26.0, *), backgroundTask is BGContinuedProcessingTask {

@@ -9,12 +9,12 @@ struct LocalAnalysisSettingsView: View {
     var body: some View {
         Form {
             Section {
-                Toggle("Analyze while charging at night", isOn: $model.overnightSettings.enabled)
+                Toggle("Automatically queue games at night", isOn: $model.overnightSettings.enabled)
                     .disabled(!hardware.supportsOvernight)
                     .accessibilityIdentifier("localAnalysis.overnight")
             } header: { Text("Overnight analysis") } footer: {
                 Text(hardware.supportsOvernight
-                     ? "Reviews saved games in your selected period between 10 pm and 7 am, while charging. iOS chooses when background work can run. Completed decisions are saved and unfinished reviews resume later."
+                     ? "Automatically adds games from your selected period. You can also choose individual games in Games > Add for analysis. Night reviews run while charging between 10 pm and 7 am when iOS grants processing time."
                      : LocalAnalysisLevel.balanced.requirement)
             }
             Section {
@@ -90,7 +90,7 @@ struct LocalAnalysisSettingsView: View {
 struct LocalAnalysisStatusView: View {
     let job: LocalAnalysisJob
     var currentDepth = 0
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.chessReduceMotion) private var reduceMotion
     private var running: Bool { job.state == .running }
     private var symbol: String {
         switch job.state {

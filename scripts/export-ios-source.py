@@ -105,6 +105,13 @@ processing on iOS 26 or later; overnight jobs run while charging between 22:00
 and 07:00 when iOS grants processing time. System interruption, force quitting,
 Low Power Mode, thermal state and memory pressure can delay completion.
 
+Games > Add for analysis lets users choose night or immediate device analysis,
+select individual games and save the selection. Explicit night selections remain
+queued when automatic overnight queuing is disabled. Row icons distinguish
+unreviewed games, night jobs, waiting jobs, active progress and completed reviews.
+Recorded results determine win/loss colors; engine evaluations never infer a
+winner. Practice browsing and trial branches keep the original game intact.
+
 The public repository publishes source only. The requested binary distribution
 is internal TestFlight. There is no warranty. The source-manifest.json file
 records SHA-256 for every included file and network.

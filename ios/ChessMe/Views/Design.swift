@@ -56,7 +56,7 @@ extension ReviewWindow {
 
 /// Make the label and chevron one target, including when nested in a Form.
 struct FullRowDisclosureStyle: DisclosureGroupStyle {
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.chessReduceMotion) private var reduceMotion
     func makeBody(configuration: Configuration) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             Button { withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.2)) { configuration.isExpanded.toggle() } } label: {

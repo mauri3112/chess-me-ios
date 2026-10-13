@@ -113,7 +113,7 @@ private struct PuzzleExerciseView: View {
     let onNext: () -> Void
     let hasNext: Bool
     @EnvironmentObject private var model: AppModel
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.chessReduceMotion) private var reduceMotion
     @Environment(\.scenePhase) private var scenePhase
     @ScaledMetric(relativeTo: .subheadline) private var statusHeight: CGFloat = 76
     @StateObject private var motion = TrainingBoardMotion()
@@ -173,12 +173,13 @@ private struct PuzzleExerciseView: View {
                     AnalysisBoardView(position: board, perspective: playthrough.positions[0].sideToMove, selectedSquare: selected,
                                       targets: targets, highlightedSquares: highlightedSquares,
                                       suggestions: boardChoices, rejectionCount: motion.rejectionCount,
+                                      successCount: motion.successCount, successSquare: motion.successSquare,
                                       evaluation: choiceEvaluation, evaluationPosition: choicePosition,
                                       showArrows: false, revealEvaluation: playthrough.isComplete,
                                       onSquare: browsingPly == nil && !motion.isAnimating && !comparingMoves && !replying && !playthrough.isComplete ? choose : nil)
                     VStack(alignment: .leading, spacing: 5) {
                         if playthrough.isComplete {
-                            Text(revealed ? "See the solution" : "You found the line").font(ChessMeStyle.title(22))
+                            Text(revealed ? "See the solution" : "Line complete").font(ChessMeStyle.title(22))
                         }
                         if let feedback {
                             Text(feedback).font(.subheadline)
@@ -291,6 +292,7 @@ private struct PuzzleExerciseView: View {
         selected = nil; showHint = false
         do {
             let accepted = try self.playthrough?.play(move, automaticallyReply: false) == true
+            if accepted { motion.celebrate(at: move.to) }
             if !accepted {
                 feedback = "Look for a stronger move. Try again."
                 if !failed { model.recordPuzzle(puzzle, correct: false, assisted: false); failed = true; recorded = true }

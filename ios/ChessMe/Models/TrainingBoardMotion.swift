@@ -7,6 +7,8 @@ final class TrainingBoardMotion: ObservableObject {
     @Published private(set) var lastMove: ChessMove?
     @Published private(set) var isAnimating = false
     @Published private(set) var rejectionCount = 0
+    @Published private(set) var successCount = 0
+    @Published private(set) var successSquare: Int?
     private var generation = UUID()
 
     func stop() {
@@ -15,6 +17,7 @@ final class TrainingBoardMotion: ObservableObject {
     }
 
     func shake() { rejectionCount += 1 }
+    func celebrate(at square: Int) { successSquare = square; successCount += 1 }
 
     func replay(_ history: MoveHistory, reduceMotion: Bool) async {
         guard !history.moves.isEmpty else { return }
@@ -53,7 +56,7 @@ final class TrainingBoardMotion: ObservableObject {
 }
 
 enum PracticeFeedback {
-    static func success() -> String { ["You found it.", "Well done!", "Right", "Correct!"].randomElement()! }
+    static func success() -> String { "Better move" }
 }
 
 struct BoardShake: GeometryEffect {

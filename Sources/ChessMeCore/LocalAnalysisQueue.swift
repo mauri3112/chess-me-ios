@@ -131,6 +131,8 @@ public struct LocalAnalysisJob: Codable, Identifiable, Sendable {
     public let configuration: DeviceEngineConfiguration
     public let level: LocalAnalysisLevel?
     public var nightOnly: Bool
+    /// Explicit game selection remains scheduled even when automatic overnight imports are off.
+    public var scheduledByUser: Bool?
     public var requiresPro: Bool
     public let createdAt: Date
     public var state: State = .queued

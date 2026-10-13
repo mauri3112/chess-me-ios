@@ -413,8 +413,9 @@ final class ChessMeUITests: XCTestCase {
         let previous = app.buttons["lesson.previousMove"]
         XCTAssertTrue(previous.isEnabled)
         previous.tap()
-        XCTAssertTrue(app.buttons["lesson.return"].waitForExistence(timeout: 5))
-        app.buttons["lesson.return"].tap()
+        XCTAssertTrue(app.buttons["lesson.playBestMove"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.buttons["lesson.return"].exists)
+        app.buttons["lesson.nextMove"].tap()
         let favorite = app.buttons["favorite.toggle"]
         for _ in 0..<3 where !favorite.isHittable { app.scrollViews["lesson.scroll"].swipeUp() }
         favorite.tap()
@@ -448,18 +449,20 @@ final class ChessMeUITests: XCTestCase {
         capture("Puzzles play button")
         play.tap()
         XCTAssertTrue(app.buttons["board.square.a2"].waitForExistence(timeout: 10))
-        let puzzleBoardFrame = board("classic").frame
+        let puzzleSquare = app.descendants(matching: .any).matching(identifier: "board.square.a8").firstMatch
+        let puzzleBoardTop = puzzleSquare.frame.minY
         XCTAssertFalse(app.staticTexts["Find the best move"].exists)
         app.buttons["board.square.a2"].tap()
         app.buttons["board.square.e6"].tap()
         XCTAssertTrue(app.staticTexts["puzzle.feedback"].waitForExistence(timeout: 5))
         XCTAssertEqual(app.staticTexts["puzzle.feedback"].label, "Correct. Find your next move.")
-        XCTAssertFalse(app.staticTexts["You found the line"].exists)
+        XCTAssertFalse(app.staticTexts["Line complete"].exists)
         XCTAssertTrue(app.buttons["board.square.f7"].waitForExistence(timeout: 5), "Wait for the animated opponent reply")
         app.buttons["board.square.f7"].tap()
         app.buttons["board.square.f8"].tap()
-        XCTAssertTrue(app.staticTexts["You found the line"].waitForExistence(timeout: 5))
-        XCTAssertEqual(board("classic").frame.minY, puzzleBoardFrame.minY, accuracy: 1, "Puzzle completion must not move the board.")
+        XCTAssertTrue(app.staticTexts["Line complete"].waitForExistence(timeout: 5))
+        capture("Puzzle board celebration stays in place")
+        XCTAssertEqual(puzzleSquare.frame.minY, puzzleBoardTop, accuracy: 1, "Puzzle completion must not move the board squares.")
         let compare = app.buttons["training.compareMoves"]
         for _ in 0..<3 where !compare.isHittable { app.scrollViews["puzzle.scroll"].swipeUp() }
         let bar = app.descendants(matching: .any)["analysis.evaluation"]
@@ -571,11 +574,21 @@ final class ChessMeUITests: XCTestCase {
         XCTAssertTrue(app.buttons["board.square.b8"].label.contains("black knight"))
         XCTAssertTrue(app.buttons["board.square.g8"].label.contains("black knight"))
         XCTAssertTrue(app.buttons["board.square.f3"].label.contains("white knight"), "Reset returns to the solved position, preserving the lesson move.")
-        let back = app.buttons["lesson.explore"]
-        for _ in 0..<4 where !back.isHittable { app.scrollViews["lesson.scroll"].swipeDown() }
-        back.tap()
-        XCTAssertTrue(app.staticTexts["lesson.success"].exists)
-        XCTAssertTrue(app.descendants(matching: .any)["board.square.f3"].label.contains("white knight"))
+        let best = app.buttons["lesson.playBestMove"]
+        XCTAssertTrue(best.exists)
+        XCTAssertFalse(app.buttons["Back to lesson"].exists)
+        XCTAssertFalse(app.buttons["Return to lesson"].exists)
+        let previous = app.buttons["lesson.previousMove"]
+        for _ in 0..<5 where !previous.isHittable { app.scrollViews["lesson.scroll"].swipeDown() }
+        let navigationY = previous.frame.minY
+        previous.tap()
+        XCTAssertTrue(best.exists, "Best-move control remains available while browsing")
+        XCTAssertEqual(previous.frame.minY, navigationY, accuracy: 2)
+        for _ in 0..<5 where !best.isHittable { app.scrollViews["lesson.scroll"].swipeUp() }
+        best.tap()
+        XCTAssertTrue(best.exists)
+        XCTAssertFalse((board("classic").value as? String ?? "").contains("2 engine suggestions"))
+        capture("Practice navigation keeps best-move playback inside the lesson")
         app.buttons["session.next"].tap()
         XCTAssertEqual(app.staticTexts["session.position"].label, "2/2")
         XCTAssertFalse(app.staticTexts["lesson.success"].exists)
@@ -892,6 +905,109 @@ final class ChessMeUITests: XCTestCase {
         app.launchArguments = ["--ui-testing", "--reset-engine", "--reset-evaluation", "--reset-local-analysis"]
         app.launchEnvironment["CHESSME_UI_TEST_LIBRARY"] = String(decoding: try JSONSerialization.data(withJSONObject: fixture), as: UTF8.self)
         app.launch()
+    }
+
+    func testSelectedNightQueueAndCancellationLeaveOtherGamesUnchanged() throws {
+        try launchQueueFixture()
+        app.tabBars.buttons["Games"].tap()
+        let first = app.descendants(matching: .any)["library.analysis.demo-queue-a"]
+        XCTAssertTrue(first.waitForExistence(timeout: 5))
+        XCTAssertTrue(first.label.contains("Not analyzed"))
+        app.buttons["games.addAnalysis"].tap()
+        chooseAnalysisSchedule("games.queueNight")
+        analysisSelection("demo-queue-a").tap()
+        XCTAssertEqual(analysisSelection("demo-queue-a").value as? String, "Selected")
+        app.buttons["analysis.cancel"].tap()
+        XCTAssertTrue(first.label.contains("Not analyzed"))
+        app.buttons["games.addAnalysis"].tap()
+        chooseAnalysisSchedule("games.queueNight")
+        analysisSelection("demo-queue-a").tap()
+        XCTAssertEqual(analysisSelection("demo-queue-a").value as? String, "Selected")
+        capture("Choose individual games for night analysis")
+        app.buttons["analysis.save"].tap()
+        capture("Night queue immediately after Save")
+        let queued = expectation(for: NSPredicate(format: "label CONTAINS 'Night analysis queued'"), evaluatedWith: first)
+        wait(for: [queued], timeout: 5)
+        XCTAssertTrue(app.descendants(matching: .any)["library.analysis.demo-queue-b"].label.contains("Not analyzed"))
+        XCTAssertFalse(app.staticTexts["Queued for tonight"].exists)
+        XCTAssertFalse(app.staticTexts["Queued on device"].exists)
+        capture("Games show recorded results and visual queue status")
+        app.buttons["game.open.demo-queue-a"].tap()
+        XCTAssertEqual(app.staticTexts["game.match"].label, "You vs Aster")
+        XCTAssertTrue(app.descendants(matching: .any)["game.result"].label.contains("won"))
+        capture("Winning game review uses You and the opponent")
+    }
+
+    func testSelectedGamesCanStartImmediateAnalysis() throws {
+        try launchQueueFixture()
+        app.tabBars.buttons["Games"].tap()
+        app.buttons["games.addAnalysis"].tap()
+        chooseAnalysisSchedule("games.queueNow")
+        analysisSelection("demo-queue-b").tap()
+        XCTAssertEqual(analysisSelection("demo-queue-b").value as? String, "Selected")
+        app.buttons["analysis.save"].tap()
+        let selected = app.descendants(matching: .any)["library.analysis.demo-queue-b"]
+        XCTAssertTrue(selected.waitForExistence(timeout: 5))
+        let admitted = expectation(for: NSPredicate(format: "label CONTAINS 'Device analysis' OR label CONTAINS 'review ready' OR label CONTAINS 'Analysis queued'"), evaluatedWith: selected)
+        wait(for: [admitted], timeout: 10)
+        XCTAssertFalse(selected.label.contains("Night analysis"))
+        XCTAssertTrue(app.descendants(matching: .any)["library.analysis.demo-queue-a"].label.contains("Not analyzed"))
+        capture("Immediate device analysis has a progress indicator")
+    }
+
+    func testSavedFilterSlidesBothWaysAndMainHeadersHaveOneTitle() throws {
+        try launchQueueFixture()
+        XCTAssertEqual(app.staticTexts["app.title"].label, "Today")
+        XCTAssertFalse(app.staticTexts["chess-me"].exists)
+        app.tabBars.buttons["Games"].tap()
+        XCTAssertEqual(app.staticTexts["app.title"].label, "Games")
+        let saved = app.buttons["games.saved"]
+        let original = saved.frame.minX
+        saved.tap()
+        XCTAssertEqual(saved.value as? String, "Selected")
+        XCTAssertLessThan(saved.frame.minX, original - 70)
+        XCTAssertTrue(saved.isHittable)
+        XCTAssertTrue(app.buttons["game.open.demo-queue-a"].exists)
+        XCTAssertFalse(app.buttons["game.open.demo-queue-b"].exists)
+        capture("Saved games control moves with its heart to the left")
+        saved.tap()
+        XCTAssertEqual(saved.value as? String, "Not selected")
+        let returned = expectation(for: NSPredicate { _, _ in abs(saved.frame.minX - original) < 2 }, evaluatedWith: saved)
+        wait(for: [returned], timeout: 5)
+        XCTAssertTrue(app.buttons["game.open.demo-queue-b"].exists)
+        capture("Saved games control returns to the right")
+        app.tabBars.buttons["Practice"].tap()
+        XCTAssertEqual(app.staticTexts["app.title"].label, "Practice")
+        XCTAssertFalse(app.staticTexts["chess-me"].exists)
+    }
+
+    private func launchQueueFixture() throws {
+        app.terminate()
+        let now = Date().timeIntervalSinceReferenceDate
+        let games: [[String: Any]] = ["Aster", "Birch", "Cedar"].enumerated().map { index, name in
+            ["id": "demo-queue-\(["a", "b", "c"][index])", "username": "Learner", "white": "Learner", "black": name,
+             "playedAt": now - Double(index + 1) * 60, "playerSide": "white", "moves": "e4 e5 Nf3 Nc6", "status": "resign",
+             "result": ["1-0", "0-1", "1/2-1/2"][index]]
+        }
+        let review: [String: Any] = ["gameID": "demo-queue-c", "findings": [], "analyzedPlies": 2, "totalPlies": 2,
+                                     "source": "cloud", "completedAt": now, "engineVersion": "ui-demonstration"]
+        let fixture: [String: Any] = ["games": games, "analyses": [review], "practice": [], "isDemo": true,
+                                     "favoriteGameIDs": ["demo-queue-a"], "skippedGames": 0]
+        app.launchArguments = ["--ui-testing", "--reset-engine", "--reset-evaluation", "--reset-local-analysis"]
+        app.launchEnvironment["CHESSME_UI_TEST_LIBRARY"] = String(decoding: try JSONSerialization.data(withJSONObject: fixture), as: UTF8.self)
+        app.launch()
+    }
+
+    private func chooseAnalysisSchedule(_ identifier: String) {
+        // iOS 27 exposes both a popup wrapper and its actionable menu item.
+        let choices = app.descendants(matching: .any).matching(identifier: identifier)
+        XCTAssertTrue(choices.firstMatch.waitForExistence(timeout: 5))
+        choices.element(boundBy: choices.count - 1).tap()
+        XCTAssertTrue(app.buttons["analysis.save"].waitForExistence(timeout: 5))
+    }
+
+    private func analysisSelection(_ gameID: String) -> XCUIElement {
+        app.descendants(matching: .any).matching(identifier: "analysis.select.\(gameID)").firstMatch
     }
 
     private func board(_ design: String) -> XCUIElement {

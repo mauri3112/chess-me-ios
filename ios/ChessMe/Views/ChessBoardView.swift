@@ -29,10 +29,13 @@ struct ChessBoardView: View {
     var moveMarker: BoardMoveMarker?
     var suggestions: [PracticeMoveSuggestion] = []
     var rejectionCount = 0
+    var successCount = 0
+    var successSquare: Int?
     var onSquare: ((Int) -> Void)?
     @Environment(\.chessBoardDesign) private var design
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.chessReduceMotion) private var reduceMotion
     @State private var pieces: [AnimatedBoardPiece] = []
+    @State private var successPhase: CGFloat = 1
 
     var body: some View {
         GeometryReader { geometry in
@@ -54,10 +57,6 @@ struct ChessBoardView: View {
                                 if selectedSquare == square || highlightedSquares.contains(square) { ChessMeStyle.gold.opacity(0.55) }
                                 if moveMarker?.square == square { moveMarker!.color.opacity(0.24) }
                                 if let destination { destination.color.opacity(destination.quality == .best ? 0.65 : 0.38) }
-                                if let origin {
-                                    Circle().strokeBorder(origin.color, lineWidth: max(2, size * 0.06))
-                                        .padding(size * 0.06)
-                                }
                                 if targets.contains(square) {
                                     Circle().fill(design.ink.opacity(0.28)).frame(width: size * 0.23, height: size * 0.23)
                                 }
@@ -94,9 +93,33 @@ struct ChessBoardView: View {
                 }
             }
             ForEach(pieces) { item in
-                ChessPieceView(piece: item.piece).frame(width: size, height: size)
+                ChessPieceView(piece: item.piece, tint: suggestions.first { $0.move.from == item.square }?.color)
+                    .frame(width: size, height: size)
+                    .keyframeAnimator(initialValue: 1.0, trigger: reduceMotion ? 0 : successCount) { content, scale in
+                        content.scaleEffect(item.square == successSquare ? scale : 1)
+                    } keyframes: { _ in
+                        CubicKeyframe(1.12, duration: 0.15)
+                        CubicKeyframe(1.0, duration: 0.35)
+                    }
                     .position(center(item.square, size: size))
                     .allowsHitTesting(false).accessibilityHidden(true)
+            }
+            if let successSquare, successCount > 0 {
+                let p = center(successSquare, size: size)
+                RoundedRectangle(cornerRadius: size * 0.14)
+                    .fill(ChessMeStyle.green.opacity(0.25 * (1 - successPhase)))
+                    .frame(width: size * (1 + successPhase * 0.6), height: size * (1 + successPhase * 0.6))
+                    .position(p).allowsHitTesting(false).accessibilityHidden(true)
+                ForEach(0..<6, id: \.self) { index in
+                    let angle = Double(index) * .pi / 3 - .pi / 2
+                    Image(systemName: "sparkle")
+                        .font(.system(size: size * 0.22, weight: .bold))
+                        .foregroundStyle(index.isMultiple(of: 2) ? ChessMeStyle.gold : ChessMeStyle.green)
+                        .scaleEffect(1 - successPhase * 0.65).opacity(1 - successPhase)
+                        .position(x: p.x + cos(angle) * size * (0.35 + successPhase),
+                                  y: p.y + sin(angle) * size * (0.35 + successPhase))
+                        .allowsHitTesting(false).accessibilityHidden(true)
+                }
             }
             ForEach(suggestions, id: \.move.uci) { suggestion in
                 Text(suggestion.mark).font(.system(size: max(10, size * 0.25), weight: .black))
@@ -144,13 +167,23 @@ struct ChessBoardView: View {
         .accessibilityIdentifier("board.design.\(design.rawValue)")
         .onAppear { reconcile(animate: false) }
         .onChange(of: position) { _, _ in reconcile(animate: true) }
+        .onChange(of: successCount) { _, _ in
+            guard !reduceMotion else { return }
+            var transaction = Transaction(); transaction.disablesAnimations = true
+            withTransaction(transaction) { successPhase = 0 }
+            Task { @MainActor in
+                try? await Task.sleep(for: .milliseconds(20))
+                withAnimation(.easeOut(duration: 0.8)) { successPhase = 1 }
+            }
+        }
+        .sensoryFeedback(.success, trigger: successCount)
     }
 
     private func squareAccessibilityValue(_ square: Int, destination: PracticeMoveSuggestion?, origin: PracticeMoveSuggestion?) -> String {
         if selectedSquare == square { return "Selected" }
         if targets.contains(square) { return "Legal destination" }
         if let destination { return "\(destination.quality.title) destination" }
-        if let origin { return "\(origin.quality.title) piece" }
+        if let origin { return "\(origin.quality.title) piece, highlighted green" }
         if let marker = moveMarker, marker.square == square {
             return "Original \(marker.quality.title.lowercased()) destination"
         }

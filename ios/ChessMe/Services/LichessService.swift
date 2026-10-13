@@ -323,6 +323,7 @@ struct LichessGameRecord: Decodable {
     let speed: String
     let createdAt: Int64
     let status: String
+    let winner: Side?
     let players: Players
     let moves: String?
     let pgn: String?
@@ -349,7 +350,8 @@ struct LichessGameRecord: Decodable {
         return .success(ChessGame(id: id, username: username, white: players.white.displayName,
                                   black: players.black.displayName, playedAt: date, playerSide: side,
                                   moves: san.joined(separator: " "), pgn: pgn, initialFEN: initialFen, status: status,
-                                  clockData: clockData, clockDataFetchedAt: Date()))
+                                  clockData: clockData, clockDataFetchedAt: Date(),
+                                  result: winner.map { $0 == .white ? .whiteWin : .blackWin } ?? (["draw", "stalemate"].contains(status) ? .draw : nil)))
     }
 
     static let finishedStatuses: Set<String> = ["mate", "resign", "stalemate", "timeout", "draw", "outoftime", "cheat", "noStart", "variantEnd"]

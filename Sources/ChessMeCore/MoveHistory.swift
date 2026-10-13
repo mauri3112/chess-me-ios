@@ -36,6 +36,12 @@ public struct MoveHistory: Equatable, Sendable {
         }
         return result
     }
+    /// Start a legal trial line from any recorded position without editing its source history.
+    public func prefix(through positionIndex: Int) -> Self {
+        let index = min(moves.count, max(0, positionIndex))
+        return MoveHistory(positions: Array(positions.prefix(index + 1)), moves: Array(moves.prefix(index)),
+                           notations: Array(notations.prefix(index + 1)))
+    }
     /// A lesson's lead-in ends at the decision, never at the player's mistake.
     public func leadIn(plies: Int = 3) -> Self {
         let start = max(0, moves.count - max(0, plies))
