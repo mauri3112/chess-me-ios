@@ -1,0 +1,58 @@
+{
+  "name": "Chess Me Clay v1",
+  "canvas": {
+    "width": 100,
+    "height": 100,
+    "baseline": 91,
+    "stroke": 2.4
+  },
+  "colors": {
+    "paper": "#FBF4EB",
+    "lightSquare": "#F2E4D2",
+    "darkSquare": "#BA9078",
+    "whitePiece": "#FFF8EB",
+    "whiteOutline": "#4D3931",
+    "blackPiece": "#503B32",
+    "blackOutline": "#352820",
+    "blackDetail": "#DFC4A8"
+  },
+  "pieces": {
+    "king": {
+      "code": "K",
+      "height": 82,
+      "width": 68,
+      "baseWidth": 68
+    },
+    "queen": {
+      "code": "Q",
+      "height": 80,
+      "width": 72,
+      "baseWidth": 64
+    },
+    "bishop": {
+      "code": "B",
+      "height": 79,
+      "width": 60,
+      "baseWidth": 60
+    },
+    "knight": {
+      "code": "N",
+      "height": 78,
+      "width": 64,
+      "baseWidth": 64
+    },
+    "rook": {
+      "code": "R",
+      "height": 72,
+      "width": 60,
+      "baseWidth": 60
+    },
+    "pawn": {
+      "code": "P",
+      "height": 68,
+      "width": 52,
+      "baseWidth": 52
+    }
+  },
+  "usage": "Render the entire square canvas at square size. Do not trim transparent padding or fit each silhouette separately."
+}

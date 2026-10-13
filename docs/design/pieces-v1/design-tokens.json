@@ -1,0 +1,58 @@
+{
+  "name": "Chess Me Staunton v1",
+  "canvas": {
+    "width": 100,
+    "height": 100,
+    "baseline": 91,
+    "stroke": 2.4
+  },
+  "colors": {
+    "paper": "#F5F2EA",
+    "lightSquare": "#E9E5DA",
+    "darkSquare": "#86A391",
+    "whitePiece": "#FAF7EF",
+    "whiteOutline": "#25352E",
+    "blackPiece": "#293D33",
+    "blackOutline": "#1D2B24",
+    "blackDetail": "#BAC8B7"
+  },
+  "pieces": {
+    "king": {
+      "code": "K",
+      "height": 82,
+      "width": 68,
+      "baseWidth": 64
+    },
+    "queen": {
+      "code": "Q",
+      "height": 80,
+      "width": 72,
+      "baseWidth": 64
+    },
+    "bishop": {
+      "code": "B",
+      "height": 79,
+      "width": 60,
+      "baseWidth": 60
+    },
+    "knight": {
+      "code": "N",
+      "height": 78,
+      "width": 64,
+      "baseWidth": 64
+    },
+    "rook": {
+      "code": "R",
+      "height": 72,
+      "width": 60,
+      "baseWidth": 60
+    },
+    "pawn": {
+      "code": "P",
+      "height": 68,
+      "width": 52,
+      "baseWidth": 52
+    }
+  },
+  "usage": "Render the entire square canvas at square size. Do not trim transparent padding or fit each silhouette separately."
+}

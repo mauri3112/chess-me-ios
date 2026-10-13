@@ -1,0 +1,9 @@
+{
+  "release": "sf_19",
+  "commit": "edb0d9db6731067ec50ce619ff372b463bc4dd5d",
+  "source_url": "https://github.com/official-stockfish/Stockfish/tree/edb0d9db6731067ec50ce619ff372b463bc4dd5d",
+  "network": "nn-1a298aa575a0.nnue",
+  "network_url": "https://tests.stockfishchess.org/api/nn/nn-1a298aa575a0.nnue",
+  "network_sha256": "1a298aa575a085434d29027978dc36867fe9c5bcea9376654b7a8eba1e52dfc2",
+  "network_bytes": 98511183
+}

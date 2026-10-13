@@ -1,0 +1,97 @@
+{
+  "canvas": {
+    "width": 100,
+    "height": 100,
+    "baseline": 91,
+    "stroke": 2.4
+  },
+  "sets": [
+    {
+      "id": "pieces-v1",
+      "displayName": "Classic",
+      "directory": "pieces-v1",
+      "colors": {
+        "paper": "#F5F2EA",
+        "lightSquare": "#E9E5DA",
+        "darkSquare": "#86A391",
+        "whitePiece": "#FAF7EF",
+        "whiteOutline": "#25352E",
+        "blackPiece": "#293D33",
+        "blackOutline": "#1D2B24",
+        "blackDetail": "#BAC8B7"
+      },
+      "pieceCount": 12,
+      "formats": [
+        "svg",
+        "pdf",
+        "png"
+      ],
+      "heightPercentByKind": {
+        "king": 82,
+        "queen": 80,
+        "bishop": 79,
+        "knight": 78,
+        "rook": 72,
+        "pawn": 68
+      }
+    },
+    {
+      "id": "pieces-v2-slate",
+      "displayName": "Slate",
+      "directory": "pieces-v2-slate",
+      "colors": {
+        "paper": "#F4F6F9",
+        "lightSquare": "#E5E9EF",
+        "darkSquare": "#8196AE",
+        "whitePiece": "#FCFCFD",
+        "whiteOutline": "#263549",
+        "blackPiece": "#27364D",
+        "blackOutline": "#192637",
+        "blackDetail": "#B9CBDD"
+      },
+      "pieceCount": 12,
+      "formats": [
+        "svg",
+        "pdf",
+        "png"
+      ],
+      "heightPercentByKind": {
+        "king": 82,
+        "queen": 80,
+        "bishop": 79,
+        "knight": 78,
+        "rook": 72,
+        "pawn": 68
+      }
+    },
+    {
+      "id": "pieces-v3-clay",
+      "displayName": "Clay",
+      "directory": "pieces-v3-clay",
+      "colors": {
+        "paper": "#FBF4EB",
+        "lightSquare": "#F2E4D2",
+        "darkSquare": "#BA9078",
+        "whitePiece": "#FFF8EB",
+        "whiteOutline": "#4D3931",
+        "blackPiece": "#503B32",
+        "blackOutline": "#352820",
+        "blackDetail": "#DFC4A8"
+      },
+      "pieceCount": 12,
+      "formats": [
+        "svg",
+        "pdf",
+        "png"
+      ],
+      "heightPercentByKind": {
+        "king": 82,
+        "queen": 80,
+        "bishop": 79,
+        "knight": 78,
+        "rook": 72,
+        "pawn": 68
+      }
+    }
+  ]
+}

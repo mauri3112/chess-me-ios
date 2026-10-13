@@ -1,0 +1,434 @@
+[
+  {
+    "platform": "Lichess Cburnett",
+    "piece": "wK",
+    "url": "https://raw.githubusercontent.com/lichess-org/lila/master/public/piece/cburnett/wK.svg",
+    "canvas": [
+      450,
+      450
+    ],
+    "bounds": [
+      51,
+      53,
+      399,
+      404
+    ],
+    "width_percent": 77.3,
+    "height_percent": 78.0,
+    "height_relative_to_white_king": 100.0
+  },
+  {
+    "platform": "Chess.com Neo",
+    "piece": "wK",
+    "url": "https://images.chesscomfiles.com/chess-themes/pieces/neo/150/wk.png",
+    "canvas": [
+      150,
+      150
+    ],
+    "bounds": [
+      17,
+      12,
+      134,
+      136
+    ],
+    "width_percent": 78.0,
+    "height_percent": 82.7,
+    "height_relative_to_white_king": 100.0
+  },
+  {
+    "platform": "Lichess Cburnett",
+    "piece": "wQ",
+    "url": "https://raw.githubusercontent.com/lichess-org/lila/master/public/piece/cburnett/wQ.svg",
+    "canvas": [
+      450,
+      450
+    ],
+    "bounds": [
+      33,
+      47,
+      417,
+      400
+    ],
+    "width_percent": 85.3,
+    "height_percent": 78.4,
+    "height_relative_to_white_king": 100.5
+  },
+  {
+    "platform": "Chess.com Neo",
+    "piece": "wQ",
+    "url": "https://images.chesscomfiles.com/chess-themes/pieces/neo/150/wq.png",
+    "canvas": [
+      150,
+      150
+    ],
+    "bounds": [
+      16,
+      16,
+      135,
+      136
+    ],
+    "width_percent": 79.3,
+    "height_percent": 80.0,
+    "height_relative_to_white_king": 96.7
+  },
+  {
+    "platform": "Lichess Cburnett",
+    "piece": "wB",
+    "url": "https://raw.githubusercontent.com/lichess-org/lila/master/public/piece/cburnett/wB.svg",
+    "canvas": [
+      450,
+      450
+    ],
+    "bounds": [
+      53,
+      47,
+      397,
+      396
+    ],
+    "width_percent": 76.4,
+    "height_percent": 77.6,
+    "height_relative_to_white_king": 99.5
+  },
+  {
+    "platform": "Chess.com Neo",
+    "piece": "wB",
+    "url": "https://images.chesscomfiles.com/chess-themes/pieces/neo/150/wb.png",
+    "canvas": [
+      150,
+      150
+    ],
+    "bounds": [
+      30,
+      13,
+      118,
+      136
+    ],
+    "width_percent": 58.7,
+    "height_percent": 82.0,
+    "height_relative_to_white_king": 99.2
+  },
+  {
+    "platform": "Lichess Cburnett",
+    "piece": "wN",
+    "url": "https://raw.githubusercontent.com/lichess-org/lila/master/public/piece/cburnett/wN.svg",
+    "canvas": [
+      450,
+      450
+    ],
+    "bounds": [
+      53,
+      63,
+      388,
+      398
+    ],
+    "width_percent": 74.4,
+    "height_percent": 74.4,
+    "height_relative_to_white_king": 95.4
+  },
+  {
+    "platform": "Chess.com Neo",
+    "piece": "wN",
+    "url": "https://images.chesscomfiles.com/chess-themes/pieces/neo/150/wn.png",
+    "canvas": [
+      150,
+      150
+    ],
+    "bounds": [
+      22,
+      16,
+      123,
+      136
+    ],
+    "width_percent": 67.3,
+    "height_percent": 80.0,
+    "height_relative_to_white_king": 96.7
+  },
+  {
+    "platform": "Lichess Cburnett",
+    "piece": "wR",
+    "url": "https://raw.githubusercontent.com/lichess-org/lila/master/public/piece/cburnett/wR.svg",
+    "canvas": [
+      450,
+      450
+    ],
+    "bounds": [
+      82,
+      83,
+      368,
+      398
+    ],
+    "width_percent": 63.6,
+    "height_percent": 70.0,
+    "height_relative_to_white_king": 89.7
+  },
+  {
+    "platform": "Chess.com Neo",
+    "piece": "wR",
+    "url": "https://images.chesscomfiles.com/chess-themes/pieces/neo/150/wr.png",
+    "canvas": [
+      150,
+      150
+    ],
+    "bounds": [
+      31,
+      25,
+      119,
+      136
+    ],
+    "width_percent": 58.7,
+    "height_percent": 74.0,
+    "height_relative_to_white_king": 89.5
+  },
+  {
+    "platform": "Lichess Cburnett",
+    "piece": "wP",
+    "url": "https://raw.githubusercontent.com/lichess-org/lila/master/public/piece/cburnett/wP.svg",
+    "canvas": [
+      450,
+      450
+    ],
+    "bounds": [
+      103,
+      83,
+      347,
+      403
+    ],
+    "width_percent": 54.2,
+    "height_percent": 71.1,
+    "height_relative_to_white_king": 91.2
+  },
+  {
+    "platform": "Chess.com Neo",
+    "piece": "wP",
+    "url": "https://images.chesscomfiles.com/chess-themes/pieces/neo/150/wp.png",
+    "canvas": [
+      150,
+      150
+    ],
+    "bounds": [
+      35,
+      34,
+      114,
+      136
+    ],
+    "width_percent": 52.7,
+    "height_percent": 68.0,
+    "height_relative_to_white_king": 82.2
+  },
+  {
+    "platform": "Lichess Cburnett",
+    "piece": "bK",
+    "url": "https://raw.githubusercontent.com/lichess-org/lila/master/public/piece/cburnett/bK.svg",
+    "canvas": [
+      450,
+      450
+    ],
+    "bounds": [
+      51,
+      53,
+      399,
+      404
+    ],
+    "width_percent": 77.3,
+    "height_percent": 78.0,
+    "height_relative_to_white_king": 100.0
+  },
+  {
+    "platform": "Chess.com Neo",
+    "piece": "bK",
+    "url": "https://images.chesscomfiles.com/chess-themes/pieces/neo/150/bk.png",
+    "canvas": [
+      150,
+      150
+    ],
+    "bounds": [
+      17,
+      12,
+      134,
+      136
+    ],
+    "width_percent": 78.0,
+    "height_percent": 82.7,
+    "height_relative_to_white_king": 100.0
+  },
+  {
+    "platform": "Lichess Cburnett",
+    "piece": "bQ",
+    "url": "https://raw.githubusercontent.com/lichess-org/lila/master/public/piece/cburnett/bQ.svg",
+    "canvas": [
+      450,
+      450
+    ],
+    "bounds": [
+      33,
+      53,
+      417,
+      412
+    ],
+    "width_percent": 85.3,
+    "height_percent": 79.8,
+    "height_relative_to_white_king": 102.3
+  },
+  {
+    "platform": "Chess.com Neo",
+    "piece": "bQ",
+    "url": "https://images.chesscomfiles.com/chess-themes/pieces/neo/150/bq.png",
+    "canvas": [
+      150,
+      150
+    ],
+    "bounds": [
+      16,
+      16,
+      135,
+      136
+    ],
+    "width_percent": 79.3,
+    "height_percent": 80.0,
+    "height_relative_to_white_king": 96.7
+  },
+  {
+    "platform": "Lichess Cburnett",
+    "piece": "bB",
+    "url": "https://raw.githubusercontent.com/lichess-org/lila/master/public/piece/cburnett/bB.svg",
+    "canvas": [
+      450,
+      450
+    ],
+    "bounds": [
+      53,
+      47,
+      397,
+      396
+    ],
+    "width_percent": 76.4,
+    "height_percent": 77.6,
+    "height_relative_to_white_king": 99.5
+  },
+  {
+    "platform": "Chess.com Neo",
+    "piece": "bB",
+    "url": "https://images.chesscomfiles.com/chess-themes/pieces/neo/150/bb.png",
+    "canvas": [
+      150,
+      150
+    ],
+    "bounds": [
+      30,
+      13,
+      118,
+      136
+    ],
+    "width_percent": 58.7,
+    "height_percent": 82.0,
+    "height_relative_to_white_king": 99.2
+  },
+  {
+    "platform": "Lichess Cburnett",
+    "piece": "bN",
+    "url": "https://raw.githubusercontent.com/lichess-org/lila/master/public/piece/cburnett/bN.svg",
+    "canvas": [
+      450,
+      450
+    ],
+    "bounds": [
+      53,
+      63,
+      388,
+      398
+    ],
+    "width_percent": 74.4,
+    "height_percent": 74.4,
+    "height_relative_to_white_king": 95.4
+  },
+  {
+    "platform": "Chess.com Neo",
+    "piece": "bN",
+    "url": "https://images.chesscomfiles.com/chess-themes/pieces/neo/150/bn.png",
+    "canvas": [
+      150,
+      150
+    ],
+    "bounds": [
+      22,
+      16,
+      123,
+      136
+    ],
+    "width_percent": 67.3,
+    "height_percent": 80.0,
+    "height_relative_to_white_king": 96.7
+  },
+  {
+    "platform": "Lichess Cburnett",
+    "piece": "bR",
+    "url": "https://raw.githubusercontent.com/lichess-org/lila/master/public/piece/cburnett/bR.svg",
+    "canvas": [
+      450,
+      450
+    ],
+    "bounds": [
+      82,
+      83,
+      368,
+      398
+    ],
+    "width_percent": 63.6,
+    "height_percent": 70.0,
+    "height_relative_to_white_king": 89.7
+  },
+  {
+    "platform": "Chess.com Neo",
+    "piece": "bR",
+    "url": "https://images.chesscomfiles.com/chess-themes/pieces/neo/150/br.png",
+    "canvas": [
+      150,
+      150
+    ],
+    "bounds": [
+      31,
+      25,
+      119,
+      136
+    ],
+    "width_percent": 58.7,
+    "height_percent": 74.0,
+    "height_relative_to_white_king": 89.5
+  },
+  {
+    "platform": "Lichess Cburnett",
+    "piece": "bP",
+    "url": "https://raw.githubusercontent.com/lichess-org/lila/master/public/piece/cburnett/bP.svg",
+    "canvas": [
+      450,
+      450
+    ],
+    "bounds": [
+      102,
+      82,
+      347,
+      403
+    ],
+    "width_percent": 54.4,
+    "height_percent": 71.3,
+    "height_relative_to_white_king": 91.4
+  },
+  {
+    "platform": "Chess.com Neo",
+    "piece": "bP",
+    "url": "https://images.chesscomfiles.com/chess-themes/pieces/neo/150/bp.png",
+    "canvas": [
+      150,
+      150
+    ],
+    "bounds": [
+      35,
+      34,
+      115,
+      136
+    ],
+    "width_percent": 53.3,
+    "height_percent": 68.0,
+    "height_relative_to_white_king": 82.2
+  }
+]

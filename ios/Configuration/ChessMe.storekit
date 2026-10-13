@@ -1,0 +1,58 @@
+{
+  "identifier" : "19A252AE",
+  "nonRenewingSubscriptions" : [],
+  "products" : [],
+  "settings" : {
+    "_applicationInternalID" : "",
+    "_developerTeamID" : "",
+    "_failTransactionsEnabled" : false,
+    "_locale" : "en_US",
+    "_storefront" : "USA",
+    "_storeKitErrors" : [],
+    "_timeRate" : 0
+  },
+  "subscriptionGroups" : [
+    {
+      "id" : "3BC61B01",
+      "localizations" : [
+        {"description" : "Longer reviews and a bounded cloud analysis allowance.", "displayName" : "chess-me Pro", "locale" : "en_US"}
+      ],
+      "name" : "chess-me Pro",
+      "subscriptions" : [
+        {
+          "adHocOffers" : [],
+          "codeOffers" : [],
+          "displayPrice" : "4.99",
+          "familyShareable" : false,
+          "groupNumber" : 1,
+          "internalID" : "63F68478",
+          "introductoryOffer" : null,
+          "localizations" : [{"description" : "Review 7, 30 and 365 days, with optional cloud analysis.", "displayName" : "Pro Monthly", "locale" : "en_US"}],
+          "productID" : "com.chessme.pro.monthly",
+          "recurringSubscriptionPeriod" : "P1M",
+          "referenceName" : "Pro Monthly",
+          "subscriptionGroupID" : "3BC61B01",
+          "type" : "RecurringSubscription",
+          "winBackOffers" : []
+        },
+        {
+          "adHocOffers" : [],
+          "codeOffers" : [],
+          "displayPrice" : "39.99",
+          "familyShareable" : false,
+          "groupNumber" : 1,
+          "internalID" : "05D39462",
+          "introductoryOffer" : null,
+          "localizations" : [{"description" : "Review 7, 30 and 365 days, with optional cloud analysis.", "displayName" : "Pro Yearly", "locale" : "en_US"}],
+          "productID" : "com.chessme.pro.yearly",
+          "recurringSubscriptionPeriod" : "P1Y",
+          "referenceName" : "Pro Yearly",
+          "subscriptionGroupID" : "3BC61B01",
+          "type" : "RecurringSubscription",
+          "winBackOffers" : []
+        }
+      ]
+    }
+  ],
+  "version" : {"major" : 4, "minor" : 0}
+}

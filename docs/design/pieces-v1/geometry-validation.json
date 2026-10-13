@@ -1,0 +1,134 @@
+[
+  {
+    "piece": "black-bishop",
+    "widthPercent": 60.16,
+    "heightPercent": 79.1,
+    "boundsAt512": [
+      102,
+      61,
+      410,
+      466
+    ]
+  },
+  {
+    "piece": "black-king",
+    "widthPercent": 67.97,
+    "heightPercent": 82.03,
+    "boundsAt512": [
+      82,
+      46,
+      430,
+      466
+    ]
+  },
+  {
+    "piece": "black-knight",
+    "widthPercent": 64.06,
+    "heightPercent": 77.93,
+    "boundsAt512": [
+      92,
+      67,
+      420,
+      466
+    ]
+  },
+  {
+    "piece": "black-pawn",
+    "widthPercent": 51.95,
+    "heightPercent": 67.97,
+    "boundsAt512": [
+      123,
+      118,
+      389,
+      466
+    ]
+  },
+  {
+    "piece": "black-queen",
+    "widthPercent": 71.88,
+    "heightPercent": 80.08,
+    "boundsAt512": [
+      72,
+      56,
+      440,
+      466
+    ]
+  },
+  {
+    "piece": "black-rook",
+    "widthPercent": 60.16,
+    "heightPercent": 72.07,
+    "boundsAt512": [
+      102,
+      97,
+      410,
+      466
+    ]
+  },
+  {
+    "piece": "white-bishop",
+    "widthPercent": 60.16,
+    "heightPercent": 79.1,
+    "boundsAt512": [
+      102,
+      61,
+      410,
+      466
+    ]
+  },
+  {
+    "piece": "white-king",
+    "widthPercent": 67.97,
+    "heightPercent": 82.03,
+    "boundsAt512": [
+      82,
+      46,
+      430,
+      466
+    ]
+  },
+  {
+    "piece": "white-knight",
+    "widthPercent": 64.06,
+    "heightPercent": 77.93,
+    "boundsAt512": [
+      92,
+      67,
+      420,
+      466
+    ]
+  },
+  {
+    "piece": "white-pawn",
+    "widthPercent": 51.95,
+    "heightPercent": 67.97,
+    "boundsAt512": [
+      123,
+      118,
+      389,
+      466
+    ]
+  },
+  {
+    "piece": "white-queen",
+    "widthPercent": 71.88,
+    "heightPercent": 80.08,
+    "boundsAt512": [
+      72,
+      56,
+      440,
+      466
+    ]
+  },
+  {
+    "piece": "white-rook",
+    "widthPercent": 60.16,
+    "heightPercent": 72.07,
+    "boundsAt512": [
+      102,
+      97,
+      410,
+      466
+    ]
+  }
+]

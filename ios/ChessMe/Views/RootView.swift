@@ -1,0 +1,246 @@
+import SwiftUI
+import ChessMeCore
+
+// Preserve the existing session identifiers while presenting the new tab order.
+enum AppTab: Int { case today = 0, games = 2, practice = 1 }
+
+struct RootView: View {
+    @EnvironmentObject private var model: AppModel
+    @EnvironmentObject private var subscriptions: SubscriptionStore
+    @EnvironmentObject private var authentication: LichessAuthentication
+    @Environment(\.scenePhase) private var scenePhase
+    @AppStorage(ChessBoardDesign.preferenceKey) private var storedDesign = ChessBoardDesign.classic.rawValue
+
+    var body: some View {
+        TabView(selection: $model.selectedTab) {
+            NavigationStack { ReviewView().modifier(LessonDestination(tab: AppTab.today.rawValue)) }
+                .tabItem { Label("Today", systemImage: "sun.max") }.tag(AppTab.today.rawValue)
+            NavigationStack { LibraryView().modifier(LessonDestination(tab: AppTab.games.rawValue)) }
+                .tabItem { Label("Games", systemImage: "books.vertical") }.tag(AppTab.games.rawValue)
+            NavigationStack { PracticeView().modifier(LessonDestination(tab: AppTab.practice.rawValue)) }
+                .tabItem { Label("Practice", systemImage: "scope") }.tag(AppTab.practice.rawValue)
+        }
+        .tint(ChessMeStyle.green)
+        .disclosureGroupStyle(FullRowDisclosureStyle())
+        .toolbarBackground(ChessMeStyle.paper, for: .tabBar)
+        .sheet(isPresented: $model.showConnection) { ConnectionView() }
+        .sheet(isPresented: $model.showPaywall) { PaywallView() }
+        .sheet(isPresented: $model.showCloudSetup) { CloudSetupView() }
+        .onChange(of: subscriptions.isPro) { _, isPro in
+            model.cloudAccessVerified = false
+            if !isPro { model.selectedWindow = .day }
+        }
+        .onChange(of: authentication.account) { _, account in
+            model.resetCloudAccess()
+            if let account { model.adoptPuzzleLevel(from: account) }
+        }
+        .environment(\.chessBoardDesign, ChessBoardDesign(rawValue: storedDesign) ?? .classic)
+        .task(id: "\(model.cloudQueueRefreshID):\(scenePhase == .active)") {
+            guard scenePhase == .active else { return }
+            while !Task.isCancelled {
+                await model.refreshCloudReviews(automatically: true)
+                do { try await Task.sleep(for: .seconds(5)) } catch { return }
+            }
+        }
+    }
+}
+
+private struct LessonDestination: ViewModifier {
+    let tab: Int
+    @EnvironmentObject private var model: AppModel
+    func body(content: Content) -> some View {
+        content.navigationDestination(isPresented: Binding(get: { model.activeLesson != nil && model.sessionTab == tab }, set: { if !$0 && model.sessionTab == tab { model.endSession() } })) {
+            LessonSessionView()
+        }
+    }
+}
+
+struct BrandHeader: View {
+    @State private var settings = false
+    var body: some View {
+        HStack {
+            HStack(spacing: 7) {
+                ChessPieceView(piece: Piece(kind: .rook, side: .black))
+                    .environment(\.chessBoardDesign, .classic).frame(width: 28, height: 28)
+                Text("chess-me").font(ChessMeStyle.title(24))
+            }
+            Spacer()
+            Button { settings = true } label: {
+                Image(systemName: "gearshape").font(.title3).frame(width: 44, height: 44)
+            }.accessibilityLabel("Settings").accessibilityIdentifier("app.settings")
+        }
+        .foregroundStyle(ChessMeStyle.ink)
+        .sheet(isPresented: $settings) { SettingsView() }
+    }
+}
+
+struct SampleNotice: View {
+    @EnvironmentObject private var model: AppModel
+    var body: some View {
+        if model.isDemo {
+            HStack {
+                Label("Sample games", systemImage: "eye").accessibilityIdentifier("demo.label")
+                Spacer()
+                Button("Exit sample") { model.exitDemo() }.disabled(model.isBusy)
+            }.font(.caption).foregroundStyle(ChessMeStyle.muted)
+        }
+    }
+}
+
+struct ReviewProgressView: View {
+    @EnvironmentObject private var model: AppModel
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            if model.isAnalyzing || model.isImporting || model.isSyncing {
+                HStack {
+                    Text(model.progressMessage.isEmpty ? "Updating your games…" : model.progressMessage).font(.caption)
+                    Spacer()
+                    if model.isAnalyzing {
+                        Button("Pause") { model.pauseAnalysis() }.font(.caption.weight(.semibold)).accessibilityIdentifier("review.pause")
+                    }
+                }
+                if model.isAnalyzing { ProgressView(value: model.progress).tint(ChessMeStyle.green) }
+                else { ProgressView() }
+            } else if model.pendingGames > 0 {
+                Button("Review \(model.pendingGames) remaining games") { model.analyzePending() }
+                    .font(.subheadline.weight(.semibold)).accessibilityIdentifier("review.resume")
+            }
+            if let message = model.syncMessage {
+                Text(message).font(.caption).foregroundStyle(ChessMeStyle.green).accessibilityIdentifier("review.syncStatus")
+            }
+            if let coverage = model.library.coverageNote { Text(coverage).font(.caption).foregroundStyle(ChessMeStyle.muted) }
+        }
+    }
+}
+
+struct ReviewView: View {
+    @EnvironmentObject private var model: AppModel
+    @EnvironmentObject private var authentication: LichessAuthentication
+    private var next: MoveFinding? { model.nextLesson() ?? model.allDuePuzzles.first ?? model.allPuzzles.first }
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 22) {
+                BrandHeader()
+                SampleNotice()
+                Text("Today").font(ChessMeStyle.title(32)).foregroundStyle(ChessMeStyle.ink)
+                if model.library.games.isEmpty { welcome }
+                else {
+                    nextAction
+                    Divider()
+                    HStack {
+                        VStack(alignment: .leading, spacing: 5) {
+                            Text("\(model.library.games.count) games imported").font(.subheadline.weight(.medium))
+                            Text("\(model.completedGames) reviewed in this period · \(model.allDuePuzzles.count) positions ready")
+                                .font(.caption).foregroundStyle(ChessMeStyle.muted)
+                        }
+                        Spacer()
+                        Button("View games") { model.selectedTab = AppTab.games.rawValue }.font(.subheadline.weight(.medium))
+                    }.accessibilityIdentifier("home.summary")
+                    ReviewProgressView()
+                    if model.currentCloudReviews.contains(where: \.isPending) {
+                        Button { model.showCloudSetup = true } label: { Label("Cloud reviews in progress", systemImage: "cloud") }
+                            .accessibilityIdentifier("cloud.open")
+                    }
+                }
+                if let notice = model.notice { Text(notice).font(.footnote).foregroundStyle(ChessMeStyle.muted) }
+            }.padding(24)
+        }
+        .accessibilityIdentifier("main.scroll").background(ChessMeStyle.paper)
+        .toolbar(.hidden, for: .navigationBar)
+    }
+
+    private var welcome: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            Text("Learn from your games").font(ChessMeStyle.title(28))
+            Text("Review your finished games and practise the moves you missed.").font(.subheadline).foregroundStyle(ChessMeStyle.muted)
+            PrimaryButton(title: authentication.account == nil ? "Connect Lichess" : "Import my games", symbol: "link") { model.showConnection = true }
+                .accessibilityIdentifier("connect.start")
+            Button("Try a sample review") { model.loadDemo() }.disabled(model.isBusy)
+                .font(.subheadline.weight(.medium)).frame(minHeight: 44).accessibilityIdentifier("demo.start")
+            ChessBoardView(position: (try? ChessPosition(fen: "r1bqkb1r/pppp1ppp/2n2n2/4p3/2B1P3/3P1N2/PPP2PPP/RNBQK2R w KQkq - 4 4")) ?? .initial)
+                .frame(maxWidth: 210).frame(maxWidth: .infinity)
+        }
+    }
+
+    @ViewBuilder private var nextAction: some View {
+        if model.activeLesson != nil {
+            PrimaryButton(title: "Continue practice", symbol: "play.fill") { model.selectedTab = model.sessionTab ?? AppTab.practice.rawValue }
+                .accessibilityIdentifier("lesson.continue")
+        } else if let next {
+            PaperCard {
+                VStack(alignment: .leading, spacing: 18) {
+                    HStack {
+                        Text("Your next lesson").font(ChessMeStyle.title(24))
+                        Spacer()
+                        Text(next.source == "cloud" ? "Cloud" : "On device").font(.caption).foregroundStyle(ChessMeStyle.muted)
+                    }
+                    HStack(spacing: 16) {
+                        ChessBoardView(position: (try? ChessPosition(fen: next.positionFEN)) ?? .initial)
+                            .frame(width: 110, height: 110).accessibilityHidden(true)
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text(next.theme).font(.subheadline.weight(.medium))
+                            Text(next.gameLabel).font(.caption).foregroundStyle(ChessMeStyle.muted)
+                        }
+                    }
+                    PrimaryButton(title: "Start practice", symbol: "play.fill") { model.startSession(allSaved: true, theme: next.theme) }
+                        .accessibilityIdentifier("lesson.start")
+                }
+            }
+        } else if model.pendingGames > 0 {
+            PaperCard {
+                VStack(alignment: .leading, spacing: 12) {
+                    Text(model.isAnalyzing ? "Finding your next lesson" : "Learn from your latest game").font(ChessMeStyle.title(24))
+                    Text(model.isAnalyzing ? "You can browse your games while reviews finish." : "Open a game to review its key moments.")
+                        .font(.subheadline).foregroundStyle(ChessMeStyle.muted)
+                    PrimaryButton(title: "View games", symbol: "books.vertical") { model.selectedTab = AppTab.games.rawValue }
+                }
+            }
+        } else {
+            PaperCard {
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("Ready for more practice?").font(ChessMeStyle.title(24))
+                    PrimaryButton(title: "Browse practice", symbol: "scope") { model.selectedTab = AppTab.practice.rawValue }
+                }
+            }
+        }
+    }
+}
+
+struct SyncGamesButton: View {
+    @EnvironmentObject private var model: AppModel
+    var iconOnly = false
+    private var updating: Bool { model.isSyncing || model.isImporting || model.isAnalyzing }
+    var body: some View {
+        Button { Task { await model.syncCompletedGames() } } label: {
+            HStack(spacing: 10) {
+                if !iconOnly { Text(updating ? "Updating your games…" : "Sync completed games").font(.subheadline.weight(.semibold)); Spacer() }
+                if updating { ProgressView().tint(ChessMeStyle.green) }
+                else { Image(systemName: "arrow.clockwise").font(iconOnly ? .title2 : .subheadline) }
+            }.frame(minWidth: 44, minHeight: 44)
+        }
+        .buttonStyle(.plain).foregroundStyle(ChessMeStyle.green)
+        .disabled(model.isBusy || model.isSyncing)
+        .accessibilityLabel(updating ? "Updating your games" : "Sync completed games")
+        .accessibilityValue(updating ? "In progress" : "Ready")
+        .accessibilityIdentifier(iconOnly ? "practice.sync" : "review.sync")
+    }
+}
+
+struct ReviewPeriodMenu: View {
+    @EnvironmentObject private var model: AppModel
+    @EnvironmentObject private var subscriptions: SubscriptionStore
+    var body: some View {
+        Menu {
+            ForEach(ReviewWindow.allCases, id: \.self) { window in
+                Button { model.select(window) } label: {
+                    Label(window.shortLabel, systemImage: !window.isFree && !subscriptions.isPro ? "lock" : model.selectedWindow == window ? "checkmark" : "calendar")
+                }.accessibilityIdentifier("window.\(window.accessibilityKey)")
+            }
+        } label: {
+            Label(model.selectedWindow == .day ? "Last 24 hours" : "Last \(model.selectedWindow.shortLabel)", systemImage: "calendar")
+                .font(.subheadline).padding(.horizontal, 14).frame(minHeight: 44)
+                .background(ChessMeStyle.ink.opacity(0.05), in: Capsule())
+        }.disabled(model.isImporting || model.isSyncing).accessibilityIdentifier("games.period")
+    }
+}
