@@ -411,6 +411,8 @@ final class AppModel: ObservableObject {
                 library = fixture
                 normalizeOpeningReviews()
                 reviewCutoff = Date()
+                if let value = ProcessInfo.processInfo.environment["CHESSME_UI_TEST_WINDOW"],
+                   let window = ReviewWindow(rawValue: value) { selectedWindow = window }
                 return
             }
             #endif

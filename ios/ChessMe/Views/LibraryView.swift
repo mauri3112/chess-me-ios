@@ -1,17 +1,30 @@
 import SwiftUI
 import ChessMeCore
 
+private enum ReviewedGameFilter: String, CaseIterable {
+    case all = "All", cloud = "Cloud", local = "Local"
+    var source: String? {
+        switch self { case .all: nil; case .cloud: "cloud"; case .local: "device" }
+    }
+    var symbol: String {
+        switch self { case .all: "checkmark.circle"; case .cloud: "cloud"; case .local: "iphone" }
+    }
+    var menuTitle: String { self == .all ? "Reviewed" : rawValue }
+}
+
 struct LibraryView: View {
     @EnvironmentObject private var model: AppModel
     @State private var savedOnly = false
-    @State private var reviewedOnly = false
-    @State private var showAnalysisChoices = false
+    @State private var reviewedFilter: ReviewedGameFilter?
     @State private var schedule: DeviceAnalysisSchedule?
-    @ScaledMetric(relativeTo: .subheadline) private var periodWidth: CGFloat = 110
     @ScaledMetric(relativeTo: .subheadline) private var filterHeight: CGFloat = 44
     private var games: [ChessGame] {
         let candidates = savedOnly ? model.favoriteGames : model.windowGames
-        return reviewedOnly ? candidates.filter { model.gameAnalysis(for: $0.id)?.isComplete == true } : candidates
+        guard let reviewedFilter else { return candidates }
+        return candidates.filter {
+            guard let review = model.gameAnalysis(for: $0.id), review.isComplete else { return false }
+            return reviewedFilter.source == nil || review.source == reviewedFilter.source
+        }
     }
     @Environment(\.chessReduceMotion) private var reduceMotion
     var body: some View {
@@ -20,7 +33,12 @@ struct LibraryView: View {
                 BrandHeader(title: "Games", tab: .games)
                 SampleNotice()
                 HStack {
-                    Button { showAnalysisChoices = true } label: { Label("Add for analysis", systemImage: "plus.circle.fill") }
+                    Menu {
+                        Button("Queue for night analysis", systemImage: "moon.fill") { schedule = .night }
+                            .accessibilityIdentifier("games.queueNight")
+                        Button("Queue to analyze now", systemImage: "play.fill") { schedule = .now }
+                            .accessibilityIdentifier("games.queueNow")
+                    } label: { Label("Add for analysis", systemImage: "plus.circle.fill") }
                         .font(.subheadline.weight(.semibold)).frame(minHeight: 44)
                         .disabled(model.isImporting || model.cloudIsRunning || games.isEmpty)
                         .accessibilityIdentifier("games.addAnalysis")
@@ -30,31 +48,24 @@ struct LibraryView: View {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 0) {
                         ReviewPeriodMenu(compact: true)
-                            .frame(width: periodWidth, height: filterHeight, alignment: .leading)
-                            .frame(width: savedOnly ? 0 : periodWidth, height: filterHeight, alignment: .leading)
+                            .fixedSize(horizontal: true, vertical: false)
+                            .frame(width: savedOnly ? 0 : nil, height: filterHeight, alignment: .leading)
                             .clipped().opacity(savedOnly ? 0 : 1).disabled(savedOnly).accessibilityHidden(savedOnly)
+                        reviewedMenu.padding(.leading, savedOnly ? 0 : 8)
                         Button { withAnimation(reduceMotion ? nil : .spring(duration: 0.45, bounce: 0.08)) { savedOnly.toggle() } } label: {
                             Label("Saved", systemImage: "heart.fill")
                                 .font(.subheadline).fixedSize().padding(.horizontal, 10).frame(height: filterHeight)
                                 .foregroundStyle(savedOnly ? .white : ChessMeStyle.ink)
                                 .background(savedOnly ? ChessMeStyle.green : ChessMeStyle.ink.opacity(0.05), in: Capsule())
-                        }.buttonStyle(.plain).padding(.leading, savedOnly ? 0 : 8).transition(.identity)
+                        }.buttonStyle(.plain).padding(.leading, 8).transition(.identity)
                             .accessibilityIdentifier("games.saved")
                             .accessibilityValue(savedOnly ? "Selected" : "Not selected")
-                        Button { reviewedOnly.toggle() } label: {
-                            Label("Reviewed", systemImage: "checkmark.circle.fill")
-                                .font(.subheadline).fixedSize().padding(.horizontal, 10).frame(height: filterHeight)
-                                .foregroundStyle(reviewedOnly ? .white : ChessMeStyle.ink)
-                                .background(reviewedOnly ? ChessMeStyle.green : ChessMeStyle.ink.opacity(0.05), in: Capsule())
-                        }.buttonStyle(.plain).padding(.leading, 8)
-                            .accessibilityIdentifier("games.reviewed")
-                            .accessibilityValue(reviewedOnly ? "Selected" : "Not selected")
                     }
                 }.frame(height: filterHeight)
                 if games.isEmpty {
-                    Text(reviewedOnly ? (savedOnly ? "No saved games have a completed review yet." : "No games have a completed review in this period yet.") : savedOnly ? "Save a game using the heart in its review." : "Your completed games will appear here after import.")
+                    Text(reviewedFilter != nil ? (savedOnly ? "No saved games match this review filter." : "No games match this review filter in this period.") : savedOnly ? "Save a game using the heart in its review." : "Your completed games will appear here after import.")
                         .font(.subheadline).foregroundStyle(ChessMeStyle.muted)
-                    if !savedOnly && !reviewedOnly {
+                    if !savedOnly && reviewedFilter == nil {
                         PrimaryButton(title: "Import games", symbol: "arrow.down") { model.showConnection = true }
                     }
                 }
@@ -92,10 +103,29 @@ struct LibraryView: View {
             }.padding(24)
         }.background(ChessMeStyle.paper).toolbar(.hidden, for: .navigationBar)
             .accessibilityIdentifier("games.scroll")
-            .confirmationDialog("Add for analysis", isPresented: $showAnalysisChoices, titleVisibility: .visible) {
-                Button("Queue for night analysis") { schedule = .night }.accessibilityIdentifier("games.queueNight")
-                Button("Queue to analyze now") { schedule = .now }.accessibilityIdentifier("games.queueNow")
-            }
             .sheet(item: $schedule) { mode in GameAnalysisSelectionView(schedule: mode, games: games) }
+    }
+
+    private var reviewedMenu: some View {
+        Menu {
+            ForEach(ReviewedGameFilter.allCases, id: \.self) { filter in
+                Button { reviewedFilter = filter } label: {
+                    Label(filter.rawValue, systemImage: reviewedFilter == filter ? "checkmark" : filter.symbol)
+                }.accessibilityIdentifier("games.reviewed.\(filter.rawValue.lowercased())")
+            }
+            Divider()
+            Button("Show all games", systemImage: "xmark.circle") { reviewedFilter = nil }
+                .accessibilityIdentifier("games.reviewed.clear")
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: reviewedFilter?.symbol ?? "checkmark.circle")
+                Text(reviewedFilter?.menuTitle ?? "Reviewed")
+                Image(systemName: "chevron.down").font(.caption2)
+            }.font(.subheadline).fixedSize(horizontal: true, vertical: false)
+                .padding(.horizontal, 10).frame(height: filterHeight)
+                .foregroundStyle(reviewedFilter == nil ? ChessMeStyle.ink : .white)
+                .background(reviewedFilter == nil ? ChessMeStyle.ink.opacity(0.05) : ChessMeStyle.green, in: Capsule())
+        }.accessibilityIdentifier("games.reviewed")
+            .accessibilityLabel("Reviewed games").accessibilityValue(reviewedFilter?.rawValue ?? "Not selected")
     }
 }

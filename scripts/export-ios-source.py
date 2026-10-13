@@ -114,10 +114,16 @@ select individual games and save the selection. Explicit night selections remain
 queued when automatic overnight queuing is disabled. Row icons distinguish
 unreviewed games, night jobs, waiting jobs, active progress and completed reviews.
 Today lists active and queued games with individual progress and links to their
-reviews. Longer queues expand to every game. Games can be filtered by Saved and
-Reviewed together; partial reviews remain outside the Reviewed filter.
+reviews. Longer queues expand to every game. Reviewed offers All, Cloud and Local
+completed reviews, with Saved to its right and an option to show all games again.
+These filters can be combined; partial reviews remain outside Reviewed. Night
+and immediate scheduling choices open beside Add for analysis. Period labels
+keep their full text, and long opponent names truncate without squeezing Explore.
 Recorded results determine win/loss colors; engine evaluations never infer a
 winner. Practice browsing and trial branches keep the original game intact.
+Wrong practice attempts allow another unaided try. Suggested moves appear after
+a solve or an explicit request for help. Solving removes the status row so the
+continuation button remains visible above the session controls on iPhone 15.
 After a puzzle is solved or revealed, its board supports legal trial moves, live
 device evaluation, best-move playback, optional engine replies and analysis
 settings. Variations can be reset without changing the puzzle or practice grade.

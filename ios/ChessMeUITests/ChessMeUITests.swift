@@ -530,14 +530,22 @@ final class ChessMeUITests: XCTestCase {
         let queen = app.buttons["board.square.h5"]
         XCTAssertTrue(queen.waitForExistence(timeout: 2), "The board should accept a retry while engine alternatives are still being evaluated")
         XCTAssertTrue(queen.label.contains("white queen"))
+        XCTAssertFalse((app.buttons["board.square.f7"].value as? String ?? "").contains("Best destination"))
+        XCTAssertEqual(board("classic").value as? String, "No engine suggestions")
+        XCTAssertFalse(app.buttons["training.compareMoves"].exists)
+        XCTAssertEqual(app.descendants(matching: .any)["analysis.evaluation"].value as? String, "?")
+        let beforeSolve = app.descendants(matching: .any)["board.square.a8"].frame
+        capture("Wrong attempt allows an unaided retry without revealing the solution")
+        app.buttons["lesson.hint"].tap()
         XCTAssertTrue((app.buttons["board.square.f7"].value as? String ?? "").contains("Best destination"))
-        let beforeSolve = board("classic").frame
-        capture("Wrong move returned with good move highlights")
+        capture("Explicit hint reveals the suggested move")
         queen.tap()
         XCTAssertEqual(queen.value as? String, "Selected")
         app.buttons["board.square.f7"].tap()
-        XCTAssertTrue(app.staticTexts["lesson.success"].waitForExistence(timeout: 2))
-        XCTAssertEqual(board("classic").frame.minY, beforeSolve.minY, accuracy: 1, "Success feedback must not move the board.")
+        let solved = expectation(for: NSPredicate(format: "value == 'Ready to continue'"), evaluatedWith: app.buttons["session.next"])
+        wait(for: [solved], timeout: 5)
+        XCTAssertFalse(app.staticTexts["lesson.success"].exists)
+        XCTAssertEqual(app.descendants(matching: .any)["board.square.a8"].frame.minY, beforeSolve.minY, accuracy: 1, "Success feedback must not move the board.")
         XCTAssertEqual(app.buttons["session.next"].value as? String, "Ready to continue")
         let compare = app.buttons["training.compareMoves"]
         let bar = app.descendants(matching: .any)["analysis.evaluation"]
@@ -577,14 +585,21 @@ final class ChessMeUITests: XCTestCase {
         app.buttons["practice.lesson.demo-continuation-2"].tap()
         let knight = app.buttons["board.square.g1"]
         XCTAssertTrue(knight.waitForExistence(timeout: 10))
-        let beforeSolve = board("classic").frame
+        let beforeSolve = app.descendants(matching: .any)["board.square.a8"].frame
         knight.tap()
         app.buttons["board.square.f3"].tap()
-        XCTAssertTrue(app.staticTexts["lesson.success"].waitForExistence(timeout: 5))
-        XCTAssertEqual(board("classic").frame.minY, beforeSolve.minY, accuracy: 1)
+        let continuation = app.buttons["lesson.continuation"]
+        XCTAssertTrue(continuation.waitForExistence(timeout: 5))
+        XCTAssertFalse(app.staticTexts["lesson.success"].exists)
+        XCTAssertFalse(app.staticTexts["Better move"].exists)
+        XCTAssertEqual(app.descendants(matching: .any)["board.square.a8"].frame.minY, beforeSolve.minY, accuracy: 1)
         XCTAssertEqual(app.buttons["session.next"].value as? String, "Ready to continue")
         XCTAssertEqual(app.buttons["session.next"].label, "Next position")
-        app.buttons["lesson.continuation"].tap()
+        XCTAssertTrue(continuation.isHittable)
+        XCTAssertLessThan(continuation.frame.maxY, app.buttons["session.next"].frame.minY - 8,
+                          "The whole continuation button must fit above the fixed session footer without scrolling")
+        capture("Correct practice move keeps the full continuation button on screen")
+        continuation.tap()
         XCTAssertTrue(app.buttons["board.square.f3"].label.contains("white knight"))
         XCTAssertTrue(app.staticTexts["Play the continuation yourself."].exists)
         let highlights = expectation(for: NSPredicate(format: "value CONTAINS 'good move highlights'"), evaluatedWith: board("classic"))
@@ -1005,6 +1020,7 @@ final class ChessMeUITests: XCTestCase {
         let original = saved.frame.minX
         let originalY = saved.frame.minY
         let originalGap = originalY - app.buttons["games.addAnalysis"].frame.maxY
+        XCTAssertGreaterThan(saved.frame.minX, app.buttons["games.reviewed"].frame.maxX)
         saved.tap()
         XCTAssertEqual(saved.value as? String, "Selected")
         XCTAssertLessThan(saved.frame.minX, original - 70)
@@ -1035,20 +1051,57 @@ final class ChessMeUITests: XCTestCase {
         let reviewed = app.buttons["games.reviewed"]
         XCTAssertTrue(reviewed.isHittable)
         reviewed.tap()
-        XCTAssertEqual(reviewed.value as? String, "Selected")
+        chooseMenuItem("games.reviewed.all")
+        XCTAssertEqual(reviewed.value as? String, "All")
         XCTAssertTrue(app.buttons["game.open.demo-queue-c"].waitForExistence(timeout: 5))
         XCTAssertFalse(app.buttons["game.open.demo-queue-a"].exists, "A partial review is still pending")
-        XCTAssertFalse(app.buttons["game.open.demo-queue-b"].exists)
+        XCTAssertTrue(app.buttons["game.open.demo-queue-b"].exists)
         capture("Reviewed filter shows complete cached reviews")
+        reviewed.tap()
+        chooseMenuItem("games.reviewed.cloud")
+        XCTAssertEqual(reviewed.value as? String, "Cloud")
+        XCTAssertTrue(app.buttons["game.open.demo-queue-b"].exists)
+        XCTAssertFalse(app.buttons["game.open.demo-queue-c"].exists)
+        capture("Cloud reviews filter")
+        reviewed.tap()
+        chooseMenuItem("games.reviewed.local")
+        XCTAssertEqual(reviewed.value as? String, "Local")
+        XCTAssertTrue(app.buttons["game.open.demo-queue-c"].exists)
+        XCTAssertFalse(app.buttons["game.open.demo-queue-b"].exists)
+        XCTAssertFalse(app.buttons["game.open.demo-queue-a"].exists)
+        capture("Local reviews filter excludes partial analysis")
         app.buttons["games.saved"].tap()
         XCTAssertTrue(app.buttons["game.open.demo-queue-c"].exists)
         XCTAssertFalse(app.buttons["game.open.demo-queue-a"].exists)
         reviewed.tap()
+        chooseMenuItem("games.reviewed.clear")
         XCTAssertTrue(app.buttons["game.open.demo-queue-a"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.buttons["game.open.demo-queue-c"].exists)
         app.buttons["games.saved"].tap()
         XCTAssertTrue(app.buttons["game.open.demo-queue-b"].waitForExistence(timeout: 5))
         capture("Saved and Reviewed filters can be combined and cleared")
+    }
+
+    func testYearFilterAndLongOpponentKeepTheirControlsVisible() throws {
+        try launchQueueFixture(window: "year", longOpponent: true)
+        app.tabBars.buttons["Games"].tap()
+        let period = app.buttons["games.period"]
+        let title = period.staticTexts["365 days"]
+        XCTAssertTrue(title.exists)
+        XCTAssertTrue(period.frame.contains(title.frame), "365 days must fit inside its filter")
+        XCTAssertTrue(app.buttons["games.saved"].isHittable)
+        XCTAssertGreaterThan(app.buttons["games.saved"].frame.minX, app.buttons["games.reviewed"].frame.maxX)
+        capture("365 days Reviewed and Saved filters fit on iPhone 15")
+        app.buttons["game.open.demo-queue-a"].tap()
+        let explore = app.buttons["game.explore"]
+        XCTAssertTrue(explore.waitForExistence(timeout: 5))
+        XCTAssertTrue(explore.isHittable)
+        XCTAssertEqual(explore.label, "Explore")
+        XCTAssertGreaterThan(explore.frame.width, 45)
+        XCTAssertLessThanOrEqual(app.staticTexts["game.match"].frame.maxX, explore.frame.minX)
+        capture("Long opponent name truncates while Explore stays fully visible")
+        explore.tap()
+        XCTAssertEqual(explore.label, "Review")
     }
 
     func testTodayShowsPerGameProgressAndOpensTheRunningAndNightGames() throws {
@@ -1077,12 +1130,13 @@ final class ChessMeUITests: XCTestCase {
         XCTAssertEqual(app.staticTexts["game.match"].label, "You vs Elm")
     }
 
-    private func launchQueueFixture(cachedReview: Bool = false, pendingJobs: Bool = false) throws {
+    private func launchQueueFixture(cachedReview: Bool = false, pendingJobs: Bool = false, window: String? = nil, longOpponent: Bool = false) throws {
         app.terminate()
         let now = Date().timeIntervalSinceReferenceDate
         let ids = ["demo-queue-a", "demo-queue-b", "demo-queue-c", "demo-queue-d", "demo-queue-e"]
         let results = ["1-0", "0-1", "1/2-1/2", "1-0", "0-1"]
-        let names = pendingJobs ? ["Aster", "Birch", "Cedar", "Dahlia", "Elm"] : ["Aster", "Birch", "Cedar"]
+        var names = pendingJobs ? ["Aster", "Birch", "Cedar", "Dahlia", "Elm"] : ["Aster", "Birch", "Cedar"]
+        if longOpponent { names[0] = "ExtraordinarilyLongOpponentNameThatShouldNeverHideExplore" }
         let games = names.enumerated().map { index, name -> [String: Any] in
             let playedAt = now - Double(index + 1) * 60
             return ["id": ids[index], "username": "Learner", "white": "Learner", "black": name,
@@ -1102,7 +1156,9 @@ final class ChessMeUITests: XCTestCase {
                                          "source": "device", "completedAt": now, "engineVersion": "ui-demonstration"]
             let job: [String: Any] = ["id": "cached-complete", "gameID": ids[2], "level": "balanced", "nightOnly": true,
                 "requiresPro": false, "createdAt": now - 60, "state": "completed", "checkpoint": cached, "configuration": configuration]
-            fixture["analyses"] = [partial]
+            var cloud = review
+            cloud["gameID"] = ids[1]
+            fixture["analyses"] = [partial, cloud]
             fixture["localAnalysisJobs"] = [job]
             fixture["favoriteGameIDs"] = [ids[0], ids[2]]
         }
@@ -1120,15 +1176,26 @@ final class ChessMeUITests: XCTestCase {
         }
         app.launchArguments = ["--ui-testing", "--reset-engine", "--reset-evaluation", "--reset-local-analysis"]
         app.launchEnvironment["CHESSME_UI_TEST_LIBRARY"] = String(decoding: try JSONSerialization.data(withJSONObject: fixture), as: UTF8.self)
+        app.launchEnvironment["CHESSME_UI_TEST_WINDOW"] = window
         app.launch()
     }
 
     private func chooseAnalysisSchedule(_ identifier: String) {
+        let choices = app.descendants(matching: .any).matching(identifier: identifier)
+        XCTAssertTrue(choices.firstMatch.waitForExistence(timeout: 5))
+        let item = choices.element(boundBy: choices.count - 1)
+        XCTAssertLessThan(item.frame.minY, app.buttons["games.addAnalysis"].frame.maxY + 150,
+                          "The schedule selector should open beside Add for analysis")
+        capture("Analysis schedule menu is anchored to Add for analysis")
+        chooseMenuItem(identifier)
+        XCTAssertTrue(app.buttons["analysis.save"].waitForExistence(timeout: 5))
+    }
+
+    private func chooseMenuItem(_ identifier: String) {
         // iOS 27 exposes both a popup wrapper and its actionable menu item.
         let choices = app.descendants(matching: .any).matching(identifier: identifier)
         XCTAssertTrue(choices.firstMatch.waitForExistence(timeout: 5))
         choices.element(boundBy: choices.count - 1).tap()
-        XCTAssertTrue(app.buttons["analysis.save"].waitForExistence(timeout: 5))
     }
 
     private func analysisSelection(_ gameID: String) -> XCUIElement {

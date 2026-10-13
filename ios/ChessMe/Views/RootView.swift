@@ -319,7 +319,7 @@ struct ReviewPeriodMenu: View {
             Group {
                 if compact {
                     HStack(spacing: 6) {
-                        Text(model.selectedWindow.shortTitle).lineLimit(1)
+                        Text(model.selectedWindow.shortTitle).lineLimit(1).fixedSize(horizontal: true, vertical: false)
                         Image(systemName: "chevron.down").font(.caption2)
                     }.padding(.horizontal, 10)
                 } else {

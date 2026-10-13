@@ -127,7 +127,7 @@ struct LessonView: View {
     }
     private var nextExplorationMove: ChessMove? { liveChoices.first?.move ?? nextLineMove }
     private var choices: [PracticeMoveSuggestion] {
-        guard hasAttempted else { return [] }
+        guard solved || showHint || guidance else { return [] }
         if let decisionEvaluation {
             let suggestions = decisionEvaluation.goodMoves(in: initial)
             if !suggestions.isEmpty { return suggestions }
@@ -184,7 +184,9 @@ struct LessonView: View {
                     if index != history.moves.count { assistanceUsed = true }
                     browsingPly = index == history.moves.count ? nil : index
                 }
-                lessonStatus
+                if !solved || revealed || exploring || browsingPly != nil || viewingOriginal {
+                    lessonStatus
+                }
                 if !solved && !exploring && browsingPly == nil && !viewingOriginal {
                     HStack {
                         Button { showHint = true; assistanceUsed = true } label: { Label("Hint", systemImage: "lightbulb") }
@@ -203,7 +205,7 @@ struct LessonView: View {
                     }.disabled(nextExplorationMove == nil || motion.isAnimating)
                         .accessibilityIdentifier("lesson.playBestMove")
                 }
-                if hasAttempted && !choices.isEmpty && !exploring && browsingPly == nil {
+                if !choices.isEmpty && !exploring && browsingPly == nil {
                     MoveChoiceLegend(suggestions: choices, comparing: $comparingMoves)
                 } else if exploring && !liveChoices.isEmpty {
                     MoveChoiceLegend(suggestions: liveChoices, comparing: $comparingMoves, allowsComparison: false)
