@@ -881,10 +881,16 @@ final class ChessMeUITests: XCTestCase {
             "r1bqkbnr/1ppp1ppp/p1n5/1B2p3/4P3/5N2/PPPP1PPP/RNBQK2R w KQkq - 0 4",
             "r1bqkb1r/1ppp1ppp/p1n2n2/4p3/B3P3/5N2/PPPP1PPP/RNBQK2R w KQkq - 2 5"
         ]
-        let assessments: [[String: Any]] = (0..<5).map { index in
-            ["ply": index * 2, "positionFEN": opening ? positions[index] : positions[index].replacingOccurrences(of: "pppppppp", with: "ppppppp1").replacingOccurrences(of: "pppp1ppp", with: "pppp1pp1").replacingOccurrences(of: "1ppp1ppp", with: "1ppp1pp1"),
-             "playedMove": played[index], "bestMove": played[index], "quality": qualities[index],
-             "centipawnLoss": 100, "whiteScore": scores[index], "completedDepth": 24, "isProvisional": true]
+        let assessments = positions.indices.map { index -> [String: Any] in
+            var fen = positions[index]
+            if !opening {
+                fen = fen.replacingOccurrences(of: "pppppppp", with: "ppppppp1")
+                fen = fen.replacingOccurrences(of: "pppp1ppp", with: "pppp1pp1")
+                fen = fen.replacingOccurrences(of: "1ppp1ppp", with: "1ppp1pp1")
+            }
+            return ["ply": index * 2, "positionFEN": fen, "playedMove": played[index],
+                    "bestMove": played[index], "quality": qualities[index], "centipawnLoss": 100,
+                    "whiteScore": scores[index], "completedDepth": 24, "isProvisional": true]
         }
         let review: [String: Any] = ["gameID": "reviewed-game", "findings": [], "analyzedPlies": 5, "totalPlies": 5,
             "source": "device", "completedAt": now, "engineVersion": "stockfish-19-1a298aa575a0-chessme-v1",
@@ -984,10 +990,13 @@ final class ChessMeUITests: XCTestCase {
     private func launchQueueFixture() throws {
         app.terminate()
         let now = Date().timeIntervalSinceReferenceDate
-        let games: [[String: Any]] = ["Aster", "Birch", "Cedar"].enumerated().map { index, name in
-            ["id": "demo-queue-\(["a", "b", "c"][index])", "username": "Learner", "white": "Learner", "black": name,
-             "playedAt": now - Double(index + 1) * 60, "playerSide": "white", "moves": "e4 e5 Nf3 Nc6", "status": "resign",
-             "result": ["1-0", "0-1", "1/2-1/2"][index]]
+        let ids = ["demo-queue-a", "demo-queue-b", "demo-queue-c"]
+        let results = ["1-0", "0-1", "1/2-1/2"]
+        let games = ["Aster", "Birch", "Cedar"].enumerated().map { index, name -> [String: Any] in
+            let playedAt = now - Double(index + 1) * 60
+            return ["id": ids[index], "username": "Learner", "white": "Learner", "black": name,
+                    "playedAt": playedAt, "playerSide": "white", "moves": "e4 e5 Nf3 Nc6", "status": "resign",
+                    "result": results[index]]
         }
         let review: [String: Any] = ["gameID": "demo-queue-c", "findings": [], "analyzedPlies": 2, "totalPlies": 2,
                                      "source": "cloud", "completedAt": now, "engineVersion": "ui-demonstration"]
