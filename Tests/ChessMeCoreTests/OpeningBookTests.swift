@@ -13,7 +13,7 @@ struct OpeningBookTests {
         let assessments = replay.moves.indices.filter { replay.positions[$0].sideToMove == game.playerSide }.map { ply in
             MoveAssessment(ply: ply, positionFEN: replay.positions[ply].fen, playedMove: replay.moves[ply].uci,
                            bestMove: replay.positions[ply].legalMoves().first { $0 != replay.moves[ply] }!.uci,
-                           quality: .mistake, centipawnLoss: 200, whiteScore: -200, completedDepth: 24, isProvisional: true)
+                           quality: .mistake, centipawnLoss: 200, whiteScore: 200, completedDepth: 24, isProvisional: true)
         }
         let findings = assessments.map { value in
             MoveFinding(id: "\(game.id)-\(value.ply)", gameID: game.id, gameLabel: game.label, positionFEN: value.positionFEN,
@@ -106,7 +106,7 @@ struct OpeningBookTests {
         let assessment = try #require(review(game("e4 e5 Nf3 Nc6")).moveAssessments?.last)
         let fields = assessment.positionFEN.split(separator: " ").prefix(4).joined(separator: " ")
         let changed = MoveAssessment(ply: assessment.ply, positionFEN: fields + " 17 2", playedMove: assessment.playedMove,
-            bestMove: assessment.bestMove, quality: assessment.quality, centipawnLoss: 200, whiteScore: -200, completedDepth: 24, isProvisional: true)
+            bestMove: assessment.bestMove, quality: assessment.quality, centipawnLoss: 200, whiteScore: 200, completedDepth: 24, isProvisional: true)
         #expect(OpeningBook.shared.line(in: try GameReplay(game: game("e4 e5 Nf3 Nc6"))).recognizes(changed))
     }
 
@@ -138,7 +138,7 @@ struct OpeningBookTests {
         let result = line.annotating(saved)
         #expect(result.moveAssessments?.map(\.quality) == [.book, .mistake])
         #expect(result.moveAssessments?.first?.engineQuality == .mistake)
-        #expect(result.findings.count == 1 && result.findings.first?.playedMove == "h2h4")
+        #expect(result.findings.isEmpty, "Ordinary errors in the first 12 moves are not practice lessons")
         #expect(result.moveAssessments?.map(\.whiteScore) == saved.moveAssessments?.map(\.whiteScore))
         #expect(result.moveAssessments?.map(\.centipawnLoss) == saved.moveAssessments?.map(\.centipawnLoss))
         #expect(result.source == saved.source && result.engineVersion == saved.engineVersion)

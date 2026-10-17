@@ -222,7 +222,7 @@ struct LichessService: Sendable {
 
     /// Lichess filters on creation time. Every window therefore means games started in this period.
     func importGames(username: String, window: ReviewWindow, accessToken: String? = nil,
-                     consented: Bool, now: Date = Date(), maxGames: Int = 20_000,
+                     consented: Bool, now: Date = Date(), maxGames: Int = 20_000, speedFilter: GameSpeedFilter = .all,
                      onGame: (@MainActor @Sendable (ChessGame) -> Void)? = nil,
                      onProgress: @escaping @MainActor @Sendable (Int) -> Void = { _ in }) async throws -> LichessImportResult {
         guard consented else { throw LichessError.consentRequired }
@@ -235,7 +235,7 @@ struct LichessService: Sendable {
             .init(name: "since", value: String(Int64((start.timeIntervalSince1970 * 1000).rounded(.down)))),
             .init(name: "until", value: String(Int64((now.timeIntervalSince1970 * 1000).rounded(.down)))),
             .init(name: "max", value: String(limit + 1)),
-            .init(name: "perfType", value: "ultraBullet,bullet,blitz,rapid,classical"),
+            .init(name: "perfType", value: speedFilter.lichessPerfTypes),
             .init(name: "ongoing", value: "false"), .init(name: "finished", value: "true"),
             .init(name: "moves", value: "true"), .init(name: "pgnInJson", value: "true"),
             .init(name: "clocks", value: "true"), .init(name: "evals", value: "false"),
@@ -258,7 +258,8 @@ struct LichessService: Sendable {
                     let record = try JSONDecoder().decode(LichessGameRecord.self, from: data)
                     switch record.importGame(username: username, start: start, end: now) {
                     case .success(let game):
-                        if seen.insert(game.id).inserted {
+                        if !speedFilter.includes(game) { skipped["outside selected time control", default: 0] += 1 }
+                        else if seen.insert(game.id).inserted {
                             games.append(game)
                             await onGame?(game)
                         }
@@ -351,7 +352,8 @@ struct LichessGameRecord: Decodable {
                                   black: players.black.displayName, playedAt: date, playerSide: side,
                                   moves: san.joined(separator: " "), pgn: pgn, initialFEN: initialFen, status: status,
                                   clockData: clockData, clockDataFetchedAt: Date(),
-                                  result: winner.map { $0 == .white ? .whiteWin : .blackWin } ?? (["draw", "stalemate"].contains(status) ? .draw : nil)))
+                                  result: winner.map { $0 == .white ? .whiteWin : .blackWin } ?? (["draw", "stalemate"].contains(status) ? .draw : nil),
+                                  speed: speed == "ultraBullet" ? .bullet : GameSpeed(rawValue: speed)))
     }
 
     static let finishedStatuses: Set<String> = ["mate", "resign", "stalemate", "timeout", "draw", "outoftime", "cheat", "noStart", "variantEnd"]

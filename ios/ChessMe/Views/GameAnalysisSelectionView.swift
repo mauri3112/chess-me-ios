@@ -7,9 +7,10 @@ struct GameAnalysisSelectionView: View {
     @EnvironmentObject private var model: AppModel
     @Environment(\.dismiss) private var dismiss
     @State private var selected = Set<String>()
+    @State private var speedFilter: GameSpeedFilter = .all
     private var available: [ChessGame] {
         let allowed = Set(model.windowGames.map(\.id))
-        return games.filter { allowed.contains($0.id) }
+        return games.filter { allowed.contains($0.id) && speedFilter.includes($0) }
     }
     private func alreadyCovered(_ game: ChessGame) -> Bool {
         model.completeDeviceReview(for: game.id, covering: model.deepConfiguration(model.overnightSettings.level)) != nil
@@ -22,6 +23,7 @@ struct GameAnalysisSelectionView: View {
                     Label(schedule == .night ? "While charging tonight" : "Start on this device", systemImage: schedule.symbol)
                     Text("Depth \(model.overnightSettings.level.depth) · \(selected.count) selected")
                         .font(.caption).foregroundStyle(ChessMeStyle.muted)
+                    GameSpeedMenu(selection: $speedFilter, identifier: "analysis.speed")
                     Button(selected == selectable ? "Deselect all" : "Select all") {
                         selected = selected == selectable ? [] : selectable
                     }.disabled(selectable.isEmpty).accessibilityIdentifier("analysis.selectAll")
@@ -35,7 +37,7 @@ struct GameAnalysisSelectionView: View {
                                     .font(.title3).foregroundStyle(covered ? ChessMeStyle.muted : ChessMeStyle.green)
                                 VStack(alignment: .leading, spacing: 5) {
                                     Text(game.reviewLabel).font(.subheadline.weight(.semibold))
-                                    Text(covered ? "Review ready at this depth" : game.playedAt.formatted(date: .abbreviated, time: .shortened))
+                                    Text(covered ? "Review ready at this depth" : "\(game.timeControl.title) · \(game.playedAt.formatted(date: .abbreviated, time: .shortened))")
                                         .font(.caption).foregroundStyle(ChessMeStyle.muted)
                                 }
                                 Spacer()

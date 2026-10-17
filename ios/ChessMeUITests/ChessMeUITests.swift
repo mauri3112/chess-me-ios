@@ -16,6 +16,39 @@ final class ChessMeUITests: XCTestCase {
         try super.tearDownWithError()
     }
 
+    func testTodayOffersPuzzlesAndOpeningPractice() throws {
+        try launchQueueFixture()
+        let puzzles = app.buttons["today.puzzles"]
+        for _ in 0..<4 where !puzzles.isHittable { app.scrollViews["main.scroll"].swipeUp() }
+        XCTAssertTrue(puzzles.isHittable)
+        capture("Today practice shortcuts")
+        puzzles.tap()
+        XCTAssertTrue(app.navigationBars["Related puzzles"].waitForExistence(timeout: 5))
+        app.navigationBars.buttons.firstMatch.tap()
+        app.buttons["today.openings"].tap()
+        XCTAssertTrue(app.staticTexts["openings.coverage"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'For Learner'")).firstMatch.exists)
+        capture("Opening practice without player preamble")
+    }
+
+    func testTimeControlFiltersGamesAndManualAnalysisSelection() throws {
+        try launchQueueFixture()
+        app.tabBars.buttons["Games"].tap()
+        XCTAssertEqual(app.buttons["games.reviewed"].value as? String, "All")
+        capture("Games with vivid win and loss colors")
+        app.buttons["games.speed"].tap()
+        chooseMenuItem("games.speed.bullet")
+        XCTAssertTrue(app.buttons["game.open.demo-queue-a"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.buttons["game.open.demo-queue-b"].exists)
+        capture("Games filtered to bullet with vivid player results")
+        app.buttons["games.addAnalysis"].tap()
+        chooseAnalysisSchedule("games.queueNight")
+        XCTAssertTrue(analysisSelection("demo-queue-a").waitForExistence(timeout: 5))
+        XCTAssertFalse(analysisSelection("demo-queue-b").exists)
+        XCTAssertTrue(app.buttons["analysis.speed"].exists)
+        capture("Manual analysis respects the selected time control")
+    }
+
     func testCloudSetupShowsOnlyTheNextRequiredStep() {
         app.terminate()
         app.launchArguments = ["--ui-testing"]
@@ -195,7 +228,7 @@ final class ChessMeUITests: XCTestCase {
     func testGameAllowsAnimatedVariationsAndReturnsToOriginalTimeline() throws {
         XCTAssertTrue(app.buttons["lesson.start"].waitForExistence(timeout: 90))
         app.tabBars.buttons["Games"].tap()
-        let game = app.buttons.containing(.staticText, identifier: "Practice partner").firstMatch
+        let game = app.buttons["game.open.demo-missed-mate"]
         XCTAssertTrue(game.waitForExistence(timeout: 5), app.debugDescription)
         game.tap()
         enterReplay()
@@ -262,7 +295,7 @@ final class ChessMeUITests: XCTestCase {
     func testReviewClocksFollowMovesAndDoNotAssignTimesToVariations() {
         XCTAssertTrue(app.buttons["lesson.start"].waitForExistence(timeout: 90))
         app.tabBars.buttons["Games"].tap()
-        let game = app.buttons.containing(.staticText, identifier: "Practice partner").firstMatch
+        let game = app.buttons["game.open.demo-missed-mate"]
         XCTAssertTrue(game.waitForExistence(timeout: 5))
         game.tap()
         enterReplay()
@@ -304,7 +337,7 @@ final class ChessMeUITests: XCTestCase {
         app.launchEnvironment["CHESSME_UI_TEST_LIBRARY"] = String(data: try JSONSerialization.data(withJSONObject: fixture), encoding: .utf8)
         app.launch()
         app.tabBars.buttons["Games"].tap()
-        app.buttons.containing(.staticText, identifier: "TryingHard87").firstMatch.tap()
+        app.buttons["game.open.\(try XCTUnwrap(game["id"] as? String))"].tap()
         enterReplay()
         let white = app.descendants(matching: .any)["game.clock.white"]
         XCTAssertTrue(white.waitForExistence(timeout: 10))
@@ -333,7 +366,7 @@ final class ChessMeUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Maximum depth: 21"].exists)
         app.buttons["Deep"].tap()
         XCTAssertTrue(app.staticTexts["Maximum depth: 24"].exists)
-        XCTAssertTrue(app.buttons["engine.device"].label.contains("Stockfish"), app.debugDescription)
+        XCTAssertTrue(app.descendants(matching: .any)["engine.device"].label.contains("Stockfish"), app.debugDescription)
         capture("Device engine settings")
         let cloud = app.descendants(matching: .any)["engine.cloud"]
         for _ in 0..<4 where !cloud.exists { app.swipeUp() }
@@ -406,7 +439,7 @@ final class ChessMeUITests: XCTestCase {
         lesson.tap()
         XCTAssertEqual(app.sheets.count, 0)
         XCTAssertTrue(app.buttons["board.square.e2"].waitForExistence(timeout: 10))
-        XCTAssertTrue((app.buttons["board.square.e2"].value as? String ?? "").contains("Original blunder destination"))
+        XCTAssertTrue((app.buttons["board.square.h7"].value as? String ?? "").contains("Original blunder destination"))
         let bar = app.descendants(matching: .any)["analysis.evaluation"]
         XCTAssertEqual(bar.value as? String, "?")
         let frame = board("classic").frame
@@ -525,7 +558,7 @@ final class ChessMeUITests: XCTestCase {
         lesson.tap()
         XCTAssertTrue(app.buttons["board.square.h5"].waitForExistence(timeout: 10))
         app.buttons["board.square.h5"].tap()
-        app.buttons["board.square.e2"].tap()
+        app.buttons["board.square.h7"].tap()
         XCTAssertTrue(app.staticTexts["lesson.feedback"].waitForExistence(timeout: 2))
         let queen = app.buttons["board.square.h5"]
         XCTAssertTrue(queen.waitForExistence(timeout: 2), "The board should accept a retry while engine alternatives are still being evaluated")
@@ -564,18 +597,18 @@ final class ChessMeUITests: XCTestCase {
         let now = Date().timeIntervalSinceReferenceDate
         let finding: [String: Any] = [
             "id": "demo-continuation-2", "gameID": "demo-continuation", "gameLabel": "You vs Practice partner",
-            "positionFEN": "rnbqkbnr/pppp1ppp/8/4p3/4P3/8/PPPP1PPP/RNBQKBNR w KQkq e6 0 2",
+            "positionFEN": "rnbqkbnr/pppp1ppp/8/4p3/4P3/8/PPPP1PPP/RNBQKBNR w KQkq e6 0 13",
             "playedMove": "h2h4", "bestMove": "g1f3", "acceptedMoves": ["g1f3"],
             "continuation": ["g1f3", "b8c6", "f1c4", "g8f6"], "centipawnLoss": 120,
             "theme": "Development", "explanation": "A demonstration of developing a knight before a wing pawn.",
-            "hint": "Develop a knight.", "moveNumber": 2, "source": "device", "isPuzzle": true
+            "hint": "Develop a knight.", "moveNumber": 13, "source": "device", "isPuzzle": true
         ]
         var following = finding
         following["id"] = "demo-continuation-following"
         let fixture: [String: Any] = [
             "games": [["id": "demo-continuation", "username": "You", "white": "You", "black": "Practice partner",
-                       "playedAt": now - 60, "playerSide": "white", "moves": "e4 e5 h4 Nc6", "status": "resign"]],
-            "analyses": [["gameID": "demo-continuation", "findings": [finding, following], "analyzedPlies": 2, "totalPlies": 2,
+                       "playedAt": now - 60, "playerSide": "white", "moves": "h4 Nc6", "initialFEN": "rnbqkbnr/pppp1ppp/8/4p3/4P3/8/PPPP1PPP/RNBQKBNR w KQkq e6 0 13", "status": "resign"]],
+            "analyses": [["gameID": "demo-continuation", "findings": [finding, following], "analyzedPlies": 1, "totalPlies": 1,
                           "source": "device", "completedAt": now, "engineVersion": "ui-demonstration"]],
             "practice": [], "isDemo": true, "skippedGames": 0
         ]
@@ -667,22 +700,22 @@ final class ChessMeUITests: XCTestCase {
         let now = Date().timeIntervalSinceReferenceDate
         let first: [String: Any] = [
             "id": "guided-first", "gameID": "guided-game", "gameLabel": "You vs Practice partner",
-            "positionFEN": "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+            "positionFEN": "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 13",
             "playedMove": "h2h4", "bestMove": "e2e4", "acceptedMoves": ["e2e4"], "continuation": ["e2e4"],
             "centipawnLoss": 120, "theme": "Development", "explanation": "Claim the centre.", "hint": "Look at a central pawn.",
-            "moveNumber": 1, "source": "device", "isPuzzle": true
+            "moveNumber": 13, "source": "device", "isPuzzle": true
         ]
         var second = first
         second["id"] = "guided-second"
-        second["positionFEN"] = "rnbqkbnr/pppp1ppp/8/4p3/4P3/8/PPPP1PPP/RNBQKBNR w KQkq e6 0 2"
-        second["moveNumber"] = 2
+        second["positionFEN"] = "rnbqkbnr/pppp1ppp/8/4p3/4P3/8/PPPP1PPP/RNBQKBNR w KQkq e6 0 14"
+        second["moveNumber"] = 14
         second["bestMove"] = "g1f3"
         second["acceptedMoves"] = ["g1f3"]
         second["continuation"] = ["g1f3"]
         let fixture: [String: Any] = [
             "games": [["id": "guided-game", "username": "You", "white": "You", "black": "Practice partner",
-                       "playedAt": now - 60, "playerSide": "white", "moves": "e4 e5 h4 Nc6", "status": "resign"]],
-            "analyses": [["gameID": "guided-game", "findings": [first, second], "analyzedPlies": 4, "totalPlies": 4,
+                       "playedAt": now - 60, "playerSide": "white", "moves": "e4 e5 h4 Nc6", "initialFEN": "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 13", "status": "resign"]],
+            "analyses": [["gameID": "guided-game", "findings": [first, second], "analyzedPlies": 2, "totalPlies": 2,
                           "source": "device", "completedAt": now, "engineVersion": "ui-demonstration"]],
             "practice": [], "isDemo": true, "skippedGames": 0
         ]
@@ -803,7 +836,7 @@ final class ChessMeUITests: XCTestCase {
         let complete = expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: app.buttons["review.pause"])
         wait(for: [complete], timeout: 90)
         app.tabBars.buttons["Games"].tap()
-        app.buttons.containing(.staticText, identifier: "Practice partner").firstMatch.tap()
+        app.buttons["game.open.demo-missed-mate"].tap()
         let review = app.buttons["game.deepReview"]
         for _ in 0..<8 where !review.isHittable { app.scrollViews["game.scroll"].swipeUp() }
         XCTAssertTrue(review.isHittable)
@@ -938,8 +971,9 @@ final class ChessMeUITests: XCTestCase {
                 fen = fen.replacingOccurrences(of: "1ppp1ppp", with: "1ppp1pp1")
             }
             return ["ply": index * 2, "positionFEN": fen, "playedMove": played[index],
-                    "bestMove": played[index], "quality": qualities[index], "centipawnLoss": 100,
-                    "whiteScore": scores[index], "completedDepth": 24, "isProvisional": true]
+                    "bestMove": ["d2d4", "b1c3", "d2d4", "d2d4", "d2d4"][index], "quality": qualities[index], "centipawnLoss": 100,
+                    "whiteScore": scores[index], "bestWhiteScore": opening ? scores[index] + 100 : [100_000, 150, -150, 1100, -400][index],
+                    "completedDepth": 24, "isProvisional": true]
         }
         let review: [String: Any] = ["gameID": "reviewed-game", "findings": [], "analyzedPlies": 5, "totalPlies": 5,
             "source": "device", "completedAt": now, "engineVersion": "stockfish-19-1a298aa575a0-chessme-v1",
@@ -988,8 +1022,8 @@ final class ChessMeUITests: XCTestCase {
         XCTAssertFalse(app.staticTexts["Queued on device"].exists)
         capture("Games show recorded results and visual queue status")
         app.buttons["game.open.demo-queue-a"].tap()
-        XCTAssertEqual(app.staticTexts["game.match"].label, "You vs Aster")
-        XCTAssertTrue(app.descendants(matching: .any)["game.result"].label.contains("won"))
+        XCTAssertTrue(app.staticTexts["game.match"].label.contains("You vs Aster"))
+        XCTAssertTrue(app.staticTexts["game.match"].label.contains("won"))
         capture("Winning game review uses You and the opponent")
     }
 
@@ -1051,21 +1085,21 @@ final class ChessMeUITests: XCTestCase {
         let reviewed = app.buttons["games.reviewed"]
         XCTAssertTrue(reviewed.isHittable)
         reviewed.tap()
-        chooseMenuItem("games.reviewed.all")
-        XCTAssertEqual(reviewed.value as? String, "All")
+        chooseMenuItem("games.reviewed.reviewed")
+        XCTAssertEqual(reviewed.value as? String, "Reviewed")
         XCTAssertTrue(app.buttons["game.open.demo-queue-c"].waitForExistence(timeout: 5))
         XCTAssertFalse(app.buttons["game.open.demo-queue-a"].exists, "A partial review is still pending")
         XCTAssertTrue(app.buttons["game.open.demo-queue-b"].exists)
         capture("Reviewed filter shows complete cached reviews")
         reviewed.tap()
         chooseMenuItem("games.reviewed.cloud")
-        XCTAssertEqual(reviewed.value as? String, "Cloud")
+        XCTAssertEqual(reviewed.value as? String, "Cloud reviewed")
         XCTAssertTrue(app.buttons["game.open.demo-queue-b"].exists)
         XCTAssertFalse(app.buttons["game.open.demo-queue-c"].exists)
         capture("Cloud reviews filter")
         reviewed.tap()
         chooseMenuItem("games.reviewed.local")
-        XCTAssertEqual(reviewed.value as? String, "Local")
+        XCTAssertEqual(reviewed.value as? String, "Local reviewed")
         XCTAssertTrue(app.buttons["game.open.demo-queue-c"].exists)
         XCTAssertFalse(app.buttons["game.open.demo-queue-b"].exists)
         XCTAssertFalse(app.buttons["game.open.demo-queue-a"].exists)
@@ -1115,7 +1149,7 @@ final class ChessMeUITests: XCTestCase {
         XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "today.analysis.open.demo-queue-a").firstMatch.exists)
         capture("Today shows the running game and individual queued games")
         running.tap()
-        XCTAssertEqual(app.staticTexts["game.match"].label, "You vs Birch")
+        XCTAssertTrue(app.staticTexts["game.match"].label.contains("You vs Birch"))
         XCTAssertTrue(app.buttons["game.explore"].exists)
         app.navigationBars.buttons.firstMatch.tap()
         let more = app.descendants(matching: .any).matching(identifier: "today.analysisMore").firstMatch
@@ -1127,7 +1161,7 @@ final class ChessMeUITests: XCTestCase {
         XCTAssertTrue(night.isHittable)
         capture("A longer Today queue expands to every queued game")
         night.tap()
-        XCTAssertEqual(app.staticTexts["game.match"].label, "You vs Elm")
+        XCTAssertTrue(app.staticTexts["game.match"].label.contains("You vs Elm"))
     }
 
     private func launchQueueFixture(cachedReview: Bool = false, pendingJobs: Bool = false, window: String? = nil, longOpponent: Bool = false) throws {
@@ -1141,7 +1175,7 @@ final class ChessMeUITests: XCTestCase {
             let playedAt = now - Double(index + 1) * 60
             return ["id": ids[index], "username": "Learner", "white": "Learner", "black": name,
                     "playedAt": playedAt, "playerSide": "white", "moves": "e4 e5 Nf3 Nc6", "status": "resign",
-                    "result": results[index]]
+                    "result": results[index], "speed": ["bullet", "blitz", "rapid", "classical", "rapid"][index]]
         }
         let review: [String: Any] = ["gameID": "demo-queue-c", "findings": [], "analyzedPlies": 2, "totalPlies": 2,
                                      "source": "cloud", "completedAt": now, "engineVersion": "ui-demonstration"]

@@ -24,11 +24,14 @@ final class AnalysisFlowTests: XCTestCase {
     }
 
     @MainActor
-    func testSessionMovesBetweenThemesWithoutEndingPresentation() throws {
-        let games = DemoContent.games()
+    func testSessionMovesBetweenPositionsWithoutEndingPresentation() throws {
+        let original = DemoContent.games()[0]
+        let second = ChessGame(id: "second-genuine-blunder", username: original.username, white: original.white, black: original.black,
+                               playedAt: original.playedAt, playerSide: original.playerSide, moves: original.moves, status: original.status)
+        let games = [original, second]
         let analyses = try games.map { try LocalAnalyzer(options: AnalysisOptions(maximumDepth: 1, nodesPerMove: 800)).analyze(game: $0) }
         let model = AppModel(previewLibrary: LibrarySnapshot(games: games, analyses: analyses, isDemo: true))
-        model.startSession(theme: "Missed checkmate")
+        model.startSession()
         XCTAssertGreaterThan(model.session.count, 1)
         let first = try XCTUnwrap(model.activeLesson)
         model.advanceSession()

@@ -20,6 +20,7 @@ final class DeviceAnalysisCoordinator {
     private var continuedRequestPending = false
     private var systemJobIDs = Set<String>()
     private var completedContinuedRequests: [String] = []
+    private var lastSystemSubtitle: String?
     private var memoryPressureUntil: Date?
     private var memoryRecovery: Task<Void, Never>?
     private let schedulerEnabled: Bool
@@ -133,16 +134,37 @@ final class DeviceAnalysisCoordinator {
 
     func preferencesChanged() {
         guard let model else { return }
+        // Ordinary automatic jobs created by older builds must adopt the same
+        // speed policy as new imports. Explicit game selections keep their budget.
+        let automaticJobs = (model.library.localAnalysisJobs ?? []).filter { $0.isPending && $0.level == nil && $0.scheduledByUser != true }
+        var replacements: [(game: ChessGame, configuration: DeviceEngineConfiguration, requiresPro: Bool)] = []
+        for job in automaticJobs {
+            guard let game = model.library.games.first(where: { $0.id == job.gameID }) else { continue }
+            let configuration = model.automaticConfiguration(for: game)
+            guard !job.matches(configuration: configuration, level: nil) else { continue }
+            mutate(job.id) { $0.state = .paused; $0.message = "Replaced by your automatic review settings. Saved decisions are retained." }
+            replacements.append((game, configuration, job.requiresPro))
+        }
+        if let activeJobID, automaticJobs.contains(where: { $0.id == activeJobID }),
+           replacements.contains(where: { replacement in automaticJobs.contains { $0.id == activeJobID && $0.gameID == replacement.game.id } }), let currentWorker = worker {
+            currentWorker.cancel()
+            Task { [weak self] in await currentWorker.value; self?.startUserWork() }
+        }
+        for replacement in replacements {
+            enqueue(games: [replacement.game], configuration: replacement.configuration, requiresPro: replacement.requiresPro)
+        }
+
         if model.overnightSettings.enabled {
             let level = Self.hardware.bounded(model.overnightSettings.level)
             guard Self.hardware.supports(level) else { model.notice = LocalAnalysisLevel.balanced.requirement; return }
             let configuration = model.deepConfiguration(level)
             if let activeJobID, let current = model.library.localAnalysisJobs?.first(where: { $0.id == activeJobID }),
-               current.nightOnly && current.scheduledByUser != true && !current.matches(configuration: configuration, level: level) { worker?.cancel() }
+               current.nightOnly && current.scheduledByUser != true && (!current.matches(configuration: configuration, level: level) || model.library.games.first(where: { $0.id == current.gameID }).map({ !model.allowsAutomaticDeepReview($0) }) == true) { worker?.cancel() }
+            let eligibleIDs = Set(model.windowGames.filter { model.allowsAutomaticDeepReview($0) }.map(\.id))
             model.updateLibrary { snapshot in
-                snapshot.localAnalysisJobs?.removeAll { $0.nightOnly && $0.scheduledByUser != true && $0.state != .completed && !$0.matches(configuration: configuration, level: level) }
+                snapshot.localAnalysisJobs?.removeAll { $0.nightOnly && $0.scheduledByUser != true && $0.state != .completed && (!$0.matches(configuration: configuration, level: level) || !eligibleIDs.contains($0.gameID)) }
             }
-            enqueue(games: model.windowGames, configuration: configuration, level: level,
+            enqueue(games: model.windowGames.filter { model.allowsAutomaticDeepReview($0) }, configuration: configuration, level: level,
                     nightOnly: true, requiresPro: model.selectedWindow != .day)
         } else {
             if let activeJobID, model.library.localAnalysisJobs?.first(where: { $0.id == activeJobID }).map({ $0.nightOnly && $0.scheduledByUser != true }) == true {
@@ -222,6 +244,7 @@ final class DeviceAnalysisCoordinator {
     func prepareContinuedRequest(identifier: String, jobIDs: Set<String>) {
         continuedIdentifier = identifier
         systemJobIDs = jobIDs
+        lastSystemSubtitle = nil
     }
 
     func accept(_ task: any AnalysisBackgroundTask) async {
@@ -476,7 +499,13 @@ final class DeviceAnalysisCoordinator {
             return total + min(1, job.progress + additional)
         }
         task.progress.completedUnitCount = max(task.progress.completedUnitCount, Int64(done * 1_000))
-        task.updateTitle("Analyzing your games", subtitle: model.progressMessage)
+        let games = Dictionary(grouping: jobs, by: \.gameID)
+        let completed = games.values.filter { $0.allSatisfy { $0.state == .completed || $0.checkpoint?.isComplete == true } }.count
+        let subtitle = completed == games.count ? "Reviewed \(completed)/\(games.count) games" : "Reviewing game \(completed + 1)/\(games.count)"
+        if subtitle != lastSystemSubtitle {
+            task.updateTitle("Analyzing your games", subtitle: subtitle)
+            lastSystemSubtitle = subtitle
+        }
     }
 
     private func finishBackground(success: Bool) {

@@ -60,6 +60,9 @@ final class GameQueueTests: XCTestCase {
         defer { model.pauseAnalysis() }
         let selected = try XCTUnwrap(games.first)
         XCTAssertTrue(model.queueForAnalysis(gameIDs: [selected.id], schedule: .night))
+        let savedSpeeds = model.automaticReviewSpeeds
+        defer { model.automaticReviewSpeeds = savedSpeeds }
+        model.automaticReviewSpeeds = Set(GameSpeed.allCases)
         model.overnightSettings.enabled = true
         XCTAssertGreaterThan(model.library.localAnalysisJobs?.count ?? 0, 1)
         model.overnightSettings.enabled = false

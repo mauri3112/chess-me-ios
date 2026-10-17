@@ -51,14 +51,13 @@ struct AnalysisTests {
         let game = try #require(DemoContent.games().first)
         let analysis = try analyzer.analyze(game: game)
         #expect(analysis.isComplete)
-        let mate = try #require(analysis.findings.first { $0.theme == "Missed checkmate" })
-        #expect(mate.moveNumber == 4)
-        #expect(mate.bestMove == "h5f7")
-        #expect(mate.isPuzzle)
-        let position = try ChessPosition(fen: mate.positionFEN)
+        #expect(analysis.findings.allSatisfy { $0.estimatedQuality == .blunder }, "Only opening blunders become lessons")
+        let position = try GameReplay(game: game).positions[6]
+        let evaluation = try analyzer.evaluate(position: position)
+        let mate = try #require(evaluation.best)
+        #expect(mate.move.uci == "h5f7")
         var replay = position
-        #expect(!(mate.acceptedMoves.contains(mate.playedMove)))
-        for token in mate.continuation { replay = try replay.applying(ChessMove(uci: token)) }
+        for move in mate.continuation { replay = try replay.applying(move) }
         #expect(replay.outcome() == .checkmate(winner: .white))
         #expect(analysis.source == "device")
         #expect(analysis.engineVersion == LocalAnalyzer.engineVersion)
@@ -126,7 +125,7 @@ struct AnalysisTests {
         }
         #expect(completedChunks == 6)
         #expect(checkpoint.analyzedPlies == checkpoint.totalPlies)
-        #expect(checkpoint.findings.contains { $0.bestMove == "h5f7" && $0.theme == "Missed checkmate" })
+        #expect(checkpoint.findings.allSatisfy { $0.estimatedQuality == .blunder })
         let repeated = try analyzer.analyze(game: game, previousAnalysis: checkpoint)
         #expect(repeated.findings == checkpoint.findings)
         #expect(repeated.analyzedPlies == checkpoint.analyzedPlies)

@@ -104,6 +104,11 @@ struct StockfishAnalyzer {
             return PositionEvaluation(moves: [], completedDepth: 0, nodes: 0)
         }
         guard requiredMove == nil || position.legalMoves().contains(requiredMove!) else { throw StockfishError.invalidPosition }
+        if let cached = OpeningEvaluationCache.shared.evaluation(position: position, history: repetitionHistory, options: options, requiredMove: requiredMove) {
+            if cancellation() { throw ChessError.cancelled }
+            update(cached)
+            return cached
+        }
         guard let cacheMB = LocalAnalysisMemoryPolicy.cacheMegabytes(requested: options.memoryMegabytes,
                                                                    availableToAppMB: StockfishEngine.availableMemoryMegabytes) else {
             throw LocalAnalysisResourceError.insufficientMemory

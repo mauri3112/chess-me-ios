@@ -70,17 +70,14 @@ struct GameDetailView: View {
             VStack(alignment: .leading, spacing: 18) {
                 if model.isDemo { Eyebrow(text: "Sample game") }
                 HStack(alignment: .center, spacing: 12) {
-                    Text(savedGame.reviewLabel).font(ChessMeStyle.title(24)).foregroundStyle(model.outcome(for: savedGame)?.color ?? ChessMeStyle.ink)
-                        .lineLimit(1).truncationMode(.tail).frame(maxWidth: .infinity, alignment: .leading)
+                    GamePlayerNames(game: savedGame, outcome: model.outcome(for: savedGame), prominent: true)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                         .accessibilityIdentifier("game.match")
                     Button(exploring ? "Review" : "Explore") {
                         exploring.toggle()
                         if !exploring { selectMoment(momentIndex) }
                     }.font(.subheadline.weight(.semibold)).fixedSize(horizontal: true, vertical: false)
                         .frame(minHeight: 44).accessibilityIdentifier("game.explore")
-                }
-                if let outcome = model.outcome(for: savedGame) {
-                    GameOutcomeBadge(outcome: outcome).accessibilityIdentifier("game.result")
                 }
                 if let opening = openingLine?.opening {
                     VStack(alignment: .leading, spacing: 4) {

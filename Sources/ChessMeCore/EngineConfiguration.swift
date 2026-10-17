@@ -113,13 +113,14 @@ public struct MoveAssessment: Codable, Identifiable, Equatable, Sendable {
     public let opening: OpeningVariation?
     /// The original engine grade is retained when opening theory supplies the displayed label.
     public let engineQuality: MoveQuality?
+    public let bestWhiteScore: Int?
     public init(ply: Int, positionFEN: String, playedMove: String, bestMove: String,
                 quality: MoveQuality, centipawnLoss: Int, whiteScore: Int, completedDepth: Int, isProvisional: Bool,
-                opening: OpeningVariation? = nil, engineQuality: MoveQuality? = nil) {
+                opening: OpeningVariation? = nil, engineQuality: MoveQuality? = nil, bestWhiteScore: Int? = nil) {
         self.ply = ply; self.positionFEN = positionFEN; self.playedMove = playedMove; self.bestMove = bestMove
         self.quality = quality; self.centipawnLoss = centipawnLoss; self.whiteScore = whiteScore
         self.completedDepth = completedDepth; self.isProvisional = isProvisional
-        self.opening = opening; self.engineQuality = engineQuality
+        self.opening = opening; self.engineQuality = engineQuality; self.bestWhiteScore = bestWhiteScore
     }
 }
 
@@ -142,7 +143,7 @@ public extension PositionEvaluation {
         let equalMate = (best.isWinningMate && actual.isWinningMate) || (best.isLosingMate && actual.isLosingMate)
         let mateLost = (best.isWinningMate && !actual.isWinningMate) || (actual.isLosingMate && !best.isLosingMate)
         let loss = equalMate ? 0 : (mateLost ? 1_000 : max(0, best.score - actual.score))
-        var quality = MoveQuality.estimated(loss: loss, isBest: best.move == played)
+        var quality = ReviewMovePolicy.quality(bestScore: best.score, playedScore: actual.score, isBest: best.move == played)
         // A candidate needs a searched sacrifice, a recovered evaluation and a clear
         // gap to other moves. It remains an estimate, never a provider award.
         if best.move == played, completedDepth >= 4, best.score >= 0, moves.count > 1,
@@ -163,7 +164,8 @@ public extension PositionEvaluation {
         return MoveAssessment(ply: ply, positionFEN: position.fen, playedMove: played.uci,
                               bestMove: best.move.uci, quality: quality, centipawnLoss: loss,
                               whiteScore: actual.score * (position.sideToMove == .white ? 1 : -1),
-                              completedDepth: completedDepth, isProvisional: true)
+                              completedDepth: completedDepth, isProvisional: true,
+                              bestWhiteScore: best.score * (position.sideToMove == .white ? 1 : -1))
     }
 }
 
@@ -174,7 +176,7 @@ public struct PracticeMoveSuggestion: Equatable, Sendable {
 }
 
 public extension MoveFinding {
-    var estimatedQuality: MoveQuality { MoveQuality.estimated(loss: Int(min(100_000, max(0, centipawnLoss.isFinite ? centipawnLoss : 0)))) }
+    var estimatedQuality: MoveQuality { quality ?? MoveQuality.estimated(loss: Int(min(100_000, max(0, centipawnLoss.isFinite ? centipawnLoss : 0)))) }
 }
 
 /// A centipawn bar is an engine estimate. Its fill is not a player's win probability.

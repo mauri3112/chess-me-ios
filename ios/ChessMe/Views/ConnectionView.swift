@@ -1,5 +1,6 @@
 import SwiftUI
 import UniformTypeIdentifiers
+import ChessMeCore
 
 struct ConnectionView: View {
     @EnvironmentObject private var model: AppModel
@@ -27,6 +28,7 @@ struct ConnectionView: View {
                             } else {
                                 ReviewPeriodMenu()
                             }
+                            GameSpeedMenu(selection: $model.importSpeedFilter, identifier: "import.speed")
                             Toggle("Allow importing my completed games", isOn: $consent)
                                 .font(.subheadline).tint(ChessMeStyle.green).accessibilityIdentifier("connection.consent")
                             if authentication.account != nil {
@@ -79,6 +81,7 @@ private struct PublicProfileImportView: View {
                 TextField("Lichess username", text: $username).textInputAutocapitalization(.never).autocorrectionDisabled()
                     .padding(15).background(.white, in: RoundedRectangle(cornerRadius: 12)).accessibilityIdentifier("connection.username")
                 ReviewPeriodMenu()
+                GameSpeedMenu(selection: $model.importSpeedFilter, identifier: "import.speed")
                 Toggle("Allow importing these public games", isOn: $consent).font(.subheadline).tint(ChessMeStyle.green)
                 PrimaryButton(title: model.isImporting ? "Importing…" : "Import public games", symbol: "arrow.down") {
                     Task { if await model.importGames(username: username.trimmingCharacters(in: .whitespacesAndNewlines)) { model.analyzePending(); onImported() } }

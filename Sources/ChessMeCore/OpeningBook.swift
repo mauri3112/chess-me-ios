@@ -36,13 +36,12 @@ public struct OpeningLine: Equatable, Sendable {
 
     /// Keep scores, search depth, progress, provenance and completion time intact.
     /// Named traps also appear in the catalogue; verified mate losses remain blunders.
-    public func annotating(_ analysis: GameAnalysis) -> GameAnalysis {
-        var protected = Set((analysis.moveAssessments ?? []).filter { value in
-            let sign = (try? ChessPosition(fen: value.positionFEN).sideToMove) == .black ? -1 : 1
-            let mateThreshold = analysis.source == "cloud" ? 9_900 : 90_000
-            return value.centipawnLoss > 0 && value.whiteScore * sign < -mateThreshold
+    public func annotating(_ original: GameAnalysis) -> GameAnalysis {
+        let analysis = ReviewMovePolicy.normalizing(original)
+        var protected = Set((analysis.moveAssessments ?? []).filter {
+            ($0.engineQuality ?? $0.quality) == .blunder
         }.map(\.ply))
-        for finding in analysis.findings where recognizes(finding) && ["Missed mate", "Missed checkmate", "King safety"].contains(finding.theme) {
+        for finding in analysis.findings where recognizes(finding) && finding.quality == .blunder {
             if let position = try? ChessPosition(fen: finding.positionFEN) {
                 protected.insert((finding.moveNumber - 1) * 2 + (position.sideToMove == .white ? 0 : 1))
             }
@@ -57,7 +56,7 @@ public struct OpeningLine: Equatable, Sendable {
             return MoveAssessment(ply: value.ply, positionFEN: value.positionFEN, playedMove: value.playedMove,
                                   bestMove: value.bestMove, quality: .book, centipawnLoss: value.centipawnLoss,
                                   whiteScore: value.whiteScore, completedDepth: value.completedDepth, isProvisional: value.isProvisional,
-                                  opening: moves[value.ply]?.opening, engineQuality: value.engineQuality ?? value.quality)
+                                  opening: moves[value.ply]?.opening, engineQuality: value.engineQuality ?? value.quality, bestWhiteScore: value.bestWhiteScore)
         }
         guard findings != analysis.findings || assessments != analysis.moveAssessments else { return analysis }
         return GameAnalysis(gameID: analysis.gameID, findings: findings, analyzedPlies: analysis.analyzedPlies,

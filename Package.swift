@@ -6,6 +6,7 @@ let package = Package(
     platforms: [.iOS(.v17), .macOS(.v14)],
     products: [.library(name: "ChessMeCore", targets: ["ChessMeCore"])],
     targets: [
+        .executableTarget(name: "OpeningCacheBuilder", dependencies: ["ChessMeCore"], path: "Tools/OpeningCacheBuilder"),
         .target(name: "CStockfish", path: "Vendor/Stockfish",
                 exclude: ["Copying.txt", "AUTHORS", "README.md", "provenance.json", "src/Makefile", "src/main.cpp", "src/universal"],
                 sources: ["bridge.cpp", "src/attacks.cpp", "src/benchmark.cpp", "src/bitboard.cpp", "src/evaluate.cpp",

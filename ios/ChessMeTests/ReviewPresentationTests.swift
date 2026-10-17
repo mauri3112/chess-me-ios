@@ -123,7 +123,7 @@ final class ReviewPresentationTests: XCTestCase {
         let assessments = [0, 2].map { ply in
             MoveAssessment(ply: ply, positionFEN: replay.positions[ply].fen, playedMove: replay.moves[ply].uci,
                            bestMove: ply == 0 ? "d2d4" : "g1f3", quality: .mistake, centipawnLoss: 200,
-                           whiteScore: -200, completedDepth: 24, isProvisional: true)
+                           whiteScore: 200, completedDepth: 24, isProvisional: true)
         }
         let findings = assessments.map { value in
             MoveFinding(id: "\(game.id)-\(value.ply)", gameID: game.id, gameLabel: game.label, positionFEN: value.positionFEN,
@@ -152,7 +152,7 @@ final class ReviewPresentationTests: XCTestCase {
         model.reconcileLocalAnalysisResults()
         let result = try XCTUnwrap(model.gameAnalysis(for: game.id))
         XCTAssertEqual(result.moveAssessments?.map(\.quality), [.book, .mistake])
-        XCTAssertEqual(result.findings.map(\.playedMove), ["h2h4"])
+        XCTAssertTrue(result.findings.isEmpty)
         XCTAssertEqual(result.completedAt, review.completedAt)
         XCTAssertEqual(result.configurationID, review.configurationID)
         XCTAssertEqual(model.library.analysisHistory?.first?.moveAssessments?.first?.quality, .book)
@@ -173,7 +173,7 @@ final class ReviewPresentationTests: XCTestCase {
         model.acceptDeviceCheckpoint(review)
         XCTAssertEqual(model.gameAnalysis(for: game.id)?.source, "cloud")
         XCTAssertEqual(model.gameAnalysis(for: game.id)?.moveAssessments?.first?.quality, .book)
-        XCTAssertEqual(model.findings.map(\.playedMove), ["h2h4"])
+        XCTAssertTrue(model.findings.isEmpty)
     }
 
     @MainActor

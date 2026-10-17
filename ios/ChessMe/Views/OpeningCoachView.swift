@@ -10,7 +10,6 @@ struct OpeningCoachView: View {
                 Text("Improve your openings").font(ChessMeStyle.title(30))
                 Text("Find the repeated early decision that costs you the most.").font(.subheadline).foregroundStyle(ChessMeStyle.muted)
                 if let report {
-                    if let username = report.username { Text("For \(username)").font(.caption).foregroundStyle(ChessMeStyle.muted) }
                     PaperCard {
                         VStack(alignment: .leading, spacing: 10) {
                             Text("\(report.reviewedGames) / \(report.requiredGames) openings reviewed").font(.subheadline.weight(.semibold))

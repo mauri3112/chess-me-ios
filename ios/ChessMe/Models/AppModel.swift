@@ -65,6 +65,26 @@ final class AppModel: ObservableObject {
             deviceAnalysis.preferencesChanged()
         }
     }
+    @Published var importSpeedFilter = GameSpeedFilter(rawValue: UserDefaults.standard.string(forKey: "import.speed") ?? "all") ?? .all {
+        didSet { UserDefaults.standard.set(importSpeedFilter.rawValue, forKey: "import.speed") }
+    }
+    @Published var automaticReviewSpeeds = Set((UserDefaults.standard.stringArray(forKey: "analysis.automaticSpeeds") ?? ["rapid", "classical"]).compactMap(GameSpeed.init(rawValue:))) {
+        didSet {
+            UserDefaults.standard.set(automaticReviewSpeeds.map(\.rawValue).sorted(), forKey: "analysis.automaticSpeeds")
+            deviceAnalysis.preferencesChanged()
+        }
+    }
+    func allowsAutomaticDeepReview(_ game: ChessGame) -> Bool { automaticReviewSpeeds.contains(game.timeControl) }
+    func automaticConfiguration(for game: ChessGame) -> DeviceEngineConfiguration {
+        var configuration = effectiveEngineConfiguration
+        if !allowsAutomaticDeepReview(game) {
+            configuration.depth = min(8, configuration.depth)
+            configuration.secondsPerPosition = 1
+            configuration.searchNodeLimit = min(100_000, configuration.searchNodeLimit ?? 100_000)
+        }
+        return configuration
+    }
+
     @Published var deviceAnalysisDepth = 0
     lazy var deviceAnalysis = DeviceAnalysisCoordinator(model: self, schedulerEnabled: !usesEphemeralLibrary && !ProcessInfo.processInfo.arguments.contains("--ui-testing"))
     @Published var cloudEngineConfiguration = CloudEngineConfiguration.saved() {
@@ -158,9 +178,9 @@ final class AppModel: ObservableObject {
         guard selectedWindow == .day || subscriptions.isPro else { showPaywall = true; return }
         let level = DeviceAnalysisCoordinator.hardware.bounded(overnightSettings.level)
         if let job = localAnalysisJob(for: gameID), job.state != .completed {
-            deviceAnalysis.enqueue(games: [game], configuration: job.configuration, level: job.level, requiresPro: selectedWindow != .day)
+            deviceAnalysis.enqueue(games: [game], configuration: job.configuration, level: job.level, requiresPro: selectedWindow != .day, scheduledByUser: true)
         } else {
-            deviceAnalysis.enqueue(games: [game], configuration: deepConfiguration(level), level: level, requiresPro: selectedWindow != .day)
+            deviceAnalysis.enqueue(games: [game], configuration: deepConfiguration(level), level: level, requiresPro: selectedWindow != .day, scheduledByUser: true)
         }
     }
     func outcome(for game: ChessGame) -> PlayerGameOutcome? {
@@ -210,7 +230,8 @@ final class AppModel: ObservableObject {
     var queuedAnalysisGames: [ChessGame] {
         let entries = library.games.compactMap { game -> (game: ChessGame, priority: Int, queuedAt: Date)? in
             guard game.isFinished else { return nil }
-            if let job = localAnalysisJob(for: game.id, includingOrdinary: true), job.isPending {
+            if let job = localAnalysisJob(for: game.id, includingOrdinary: true), job.isPending,
+               completeDeviceReview(for: game.id, covering: job.configuration) == nil {
                 let priority = job.state == .running ? 0 : job.nightOnly ? 3 : job.level != nil ? 1 : 2
                 return (game, priority, job.createdAt)
             }
@@ -243,6 +264,9 @@ final class AppModel: ObservableObject {
         normalizeOpeningReviews()
         let saved = Dictionary(library.analyses.map { ($0.gameID, $0) }, uniquingKeysWith: { first, _ in first })
         for job in library.localAnalysisJobs ?? [] {
+            if job.isPending, let ready = completeDeviceReview(for: job.gameID, covering: job.configuration) {
+                completeCoveredJobs(using: ready, configuration: job.configuration)
+            }
             if let checkpoint = job.checkpoint, checkpoint.gameID == job.gameID, checkpoint.source == "device", checkpoint.isComplete {
                 if let existing = saved[job.gameID], existing.isComplete, existing.completedAt >= checkpoint.completedAt {
                     completeCoveredJobs(using: checkpoint, configuration: job.configuration)
@@ -308,6 +332,10 @@ final class AppModel: ObservableObject {
                 configuration.engine = .stockfish
                 if let encoded = try? JSONEncoder().encode(configuration) { UserDefaults.standard.set(encoded, forKey: "analysis.device.configuration") }
             }
+        }
+        if configuration.engine != .stockfish {
+            configuration.engine = .stockfish
+            if let encoded = try? JSONEncoder().encode(configuration) { UserDefaults.standard.set(encoded, forKey: "analysis.device.configuration") }
         }
         return configuration
     }
@@ -481,6 +509,7 @@ final class AppModel: ObservableObject {
         guard !storageInitializationFailed else { notice = ImportFailure.storageUnavailable.localizedDescription; return false }
         guard selectedWindow == .day || subscriptions.isPro else { showPaywall = true; return false }
         let window = selectedWindow
+        let speedFilter = importSpeedFilter
         isImporting = true
         notice = nil
         syncMessage = nil
@@ -503,7 +532,7 @@ final class AppModel: ObservableObject {
                 token = try authentication.accessToken()
             }
             let existingIDs = Set(library.games.map(\.id))
-            let result = try await lichessService.importGames(username: target, window: window, accessToken: token, consented: true, now: Date(), onGame: { [weak self] game in
+            let result = try await lichessService.importGames(username: target, window: window, accessToken: token, consented: true, now: Date(), speedFilter: speedFilter, onGame: { [weak self] game in
                 incremental.append(game)
                 if incremental.count >= 100 {
                     self?.mergeImported(incremental)
@@ -518,12 +547,13 @@ final class AppModel: ObservableObject {
             library.importedAt = Date()
             library.lastSyncedUsername = username != nil ? target : nil
             library.skippedGames = result.skippedGames
-            library.coverageNote = result.isComplete ? "\(window.shortLabel) import complete for finished standard live games." : (result.reachedLimit ? "\(window.shortLabel) import limited to the most recent 20,000 games. Select a smaller period to review more of your archive." : "\(window.shortLabel) import is partial because some exports could not be read. Completed records have been saved.")
+            let coverageScope = speedFilter == .all ? "finished standard live games" : "finished standard \(speedFilter.title.lowercased()) games"
+            library.coverageNote = result.isComplete ? "\(window.shortLabel) import complete for \(coverageScope)." : (result.reachedLimit ? "\(window.shortLabel) import limited to the most recent 20,000 games. Select a smaller period to review more of your archive." : "\(window.shortLabel) import is partial because some exports could not be read. Completed records have been saved.")
             reviewCutoff = Date()
             let saved = persist()
             progressMessage = saved ? "Import saved" : "Import received, but could not be saved"
             if result.games.isEmpty {
-                syncMessage = result.isComplete ? "No completed games in this period." : "No readable games · partial import"
+                syncMessage = result.isComplete ? "No completed \(speedFilter == .all ? "" : speedFilter.title.lowercased() + " ")games in this period." : "No readable games · partial import"
             } else if saved {
                 let newCount = result.games.filter { !existingIDs.contains($0.id) }.count
                 syncMessage = "\(result.games.count) \(result.games.count == 1 ? "game" : "games") synced · \(newCount) new\(result.isComplete ? "" : " · partial import")"
@@ -550,7 +580,15 @@ final class AppModel: ObservableObject {
         let engineVersion = LocalAnalyzer(options: options).engineVersion
         let complete = Set(library.analyses.filter { $0.isComplete && ($0.source == "cloud" || ($0.engineVersion == engineVersion && $0.configurationID == options.configurationID)) }.map(\.gameID))
         let pending = windowGames.filter { game in gameID == nil ? !complete.contains(game.id) : game.id == gameID }
-        deviceAnalysis.enqueue(games: pending, configuration: configuration, requiresPro: selectedWindow != .day)
+        let normal = pending.filter { gameID != nil || allowsAutomaticDeepReview($0) }
+        let quick = pending.filter { gameID == nil && !allowsAutomaticDeepReview($0) }
+        // Fast games still get an initial review, with a one-second, depth-eight ceiling.
+        var quickConfiguration = configuration
+        quickConfiguration.depth = min(8, configuration.depth)
+        quickConfiguration.secondsPerPosition = 1
+        quickConfiguration.searchNodeLimit = min(100_000, configuration.searchNodeLimit ?? 100_000)
+        deviceAnalysis.enqueue(games: quick, configuration: quickConfiguration, requiresPro: selectedWindow != .day)
+        deviceAnalysis.enqueue(games: normal, configuration: configuration, requiresPro: selectedWindow != .day, scheduledByUser: gameID != nil)
         if overnightSettings.enabled { deviceAnalysis.preferencesChanged() }
     }
 

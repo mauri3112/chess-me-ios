@@ -11,7 +11,7 @@
     <key>CFBundlePackageType</key><string>APPL</string>
     <key>CFBundleShortVersionString</key><string>$(MARKETING_VERSION)</string>
     <key>CFBundleVersion</key><string>$(CURRENT_PROJECT_VERSION)</string>
-    <key>ChessMeSourceCodeURL</key><string>https://github.com/mauri3112/chess-me-ios/tree/ios-0.2.0-build24</string>
+    <key>ChessMeSourceCodeURL</key><string>https://github.com/mauri3112/chess-me-ios/tree/ios-0.2.0-build25</string>
     <key>ChessMeLichessClientID</key><string>chess-me-ios</string>
     <key>ChessMeCloudBaseURL</key><string>https://api.trigrd.tech/chessme-sandbox</string>
     <key>ChessMeCloudEnvironment</key><string>Sandbox</string>

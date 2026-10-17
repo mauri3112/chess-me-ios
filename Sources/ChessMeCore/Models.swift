@@ -45,6 +45,25 @@ public enum GameResult: String, Codable, Sendable {
 
 public enum PlayerGameOutcome: String, Sendable { case won, lost, draw }
 
+public enum GameSpeed: String, Codable, CaseIterable, Identifiable, Sendable {
+    case bullet, blitz, rapid, classical, unknown
+    public var id: String { rawValue }
+    public var title: String { self == .unknown ? "Unknown time control" : rawValue.capitalized }
+    public static func from(seconds: Int, increment: Int) -> Self {
+        guard seconds >= 0, increment >= 0, increment <= (Int.max - seconds) / 40 else { return .unknown }
+        let estimated = seconds + 40 * increment
+        return estimated < 180 ? .bullet : estimated < 480 ? .blitz : estimated < 1500 ? .rapid : .classical
+    }
+}
+
+public enum GameSpeedFilter: String, Codable, CaseIterable, Identifiable, Sendable {
+    case all, bullet, blitz, rapid, classical
+    public var id: String { rawValue }
+    public var title: String { self == .all ? "All time controls" : rawValue.capitalized }
+    public func includes(_ game: ChessGame) -> Bool { self == .all || rawValue == game.timeControl.rawValue }
+    public var lichessPerfTypes: String { self == .all ? "ultraBullet,bullet,blitz,rapid,classical" : self == .bullet ? "ultraBullet,bullet" : rawValue }
+}
+
 public struct ChessGame: Codable, Identifiable, Equatable, Sendable {
     public let id: String
     public let username: String
@@ -61,15 +80,29 @@ public struct ChessGame: Codable, Identifiable, Equatable, Sendable {
     /// A successful export can legitimately have no clocks. Do not keep fetching it.
     public let clockDataFetchedAt: Date?
     public let result: GameResult?
+    public let speed: GameSpeed?
 
     public init(id: String, username: String, white: String, black: String, playedAt: Date,
                 playerSide: Side, moves: String, pgn: String? = nil, initialFEN: String? = nil,
-                status: String = "mate", clockData: GameClockData? = nil, clockDataFetchedAt: Date? = nil, result: GameResult? = nil) {
+                status: String = "mate", clockData: GameClockData? = nil, clockDataFetchedAt: Date? = nil, result: GameResult? = nil, speed: GameSpeed? = nil) {
         self.id = id; self.username = username; self.white = white; self.black = black
         self.playedAt = playedAt; self.playerSide = playerSide; self.moves = moves
         self.pgn = pgn; self.initialFEN = initialFEN; self.status = status
         self.clockData = clockData; self.clockDataFetchedAt = clockDataFetchedAt
-        self.result = result
+        self.result = result; self.speed = speed
+    }
+
+    public var timeControl: GameSpeed {
+        if let speed { return speed }
+        if let seconds = clockData?.initialSeconds { return .from(seconds: seconds, increment: clockData?.incrementSeconds ?? 0) }
+        if let pgn, let value = (try? PGNDocument(pgn))?.headers["TimeControl"] {
+            let fields = value.split(separator: "+", omittingEmptySubsequences: false)
+            if let first = fields.first, let seconds = Int(first), fields.count <= 2 {
+                guard fields.count == 1 || Int(fields[1]) != nil else { return .unknown }
+                return .from(seconds: seconds, increment: fields.count == 2 ? Int(fields[1])! : 0)
+            }
+        }
+        return .unknown
     }
 
     public var label: String { "\(white) vs \(black)" }
@@ -95,12 +128,12 @@ public struct ChessGame: Codable, Identifiable, Equatable, Sendable {
     }
     public func withClockData(_ data: GameClockData?, fetchedAt: Date) -> ChessGame {
         ChessGame(id: id, username: username, white: white, black: black, playedAt: playedAt, playerSide: playerSide,
-                  moves: moves, pgn: pgn, initialFEN: initialFEN, status: status, clockData: data, clockDataFetchedAt: fetchedAt, result: result)
+                  moves: moves, pgn: pgn, initialFEN: initialFEN, status: status, clockData: data, clockDataFetchedAt: fetchedAt, result: result, speed: speed)
     }
     public func withResult(_ value: GameResult?) -> ChessGame {
         ChessGame(id: id, username: username, white: white, black: black, playedAt: playedAt, playerSide: playerSide,
                   moves: moves, pgn: pgn, initialFEN: initialFEN, status: status, clockData: clockData,
-                  clockDataFetchedAt: clockDataFetchedAt, result: value)
+                  clockDataFetchedAt: clockDataFetchedAt, result: value, speed: speed)
     }
 }
 
@@ -122,16 +155,17 @@ public struct MoveFinding: Codable, Identifiable, Equatable, Sendable {
     public let source: String
     /// Ambiguous strategic findings are review cards instead of graded puzzles.
     public let isPuzzle: Bool
+    public let quality: MoveQuality?
 
     public init(id: String, gameID: String, gameLabel: String, positionFEN: String,
                 playedMove: String, bestMove: String, acceptedMoves: [String], continuation: [String],
                 centipawnLoss: Double, theme: String, explanation: String, hint: String,
-                moveNumber: Int, source: String = "device", isPuzzle: Bool = true) {
+                moveNumber: Int, source: String = "device", isPuzzle: Bool = true, quality: MoveQuality? = nil) {
         self.id = id; self.gameID = gameID; self.gameLabel = gameLabel; self.positionFEN = positionFEN
         self.playedMove = playedMove; self.bestMove = bestMove; self.acceptedMoves = acceptedMoves
         self.continuation = continuation; self.centipawnLoss = centipawnLoss; self.theme = theme
         self.explanation = explanation; self.hint = hint; self.moveNumber = moveNumber
-        self.source = source; self.isPuzzle = isPuzzle
+        self.source = source; self.isPuzzle = isPuzzle; self.quality = quality
     }
 }
 
@@ -213,7 +247,7 @@ public enum DemoContent {
         [
             ChessGame(id: "demo-missed-mate", username: "You", white: "You", black: "Practice partner",
                       playedAt: now.addingTimeInterval(-3_600), playerSide: .white,
-                      moves: "1. e4 e5 2. Qh5 Nc6 3. Bc4 Nf6 4. Qe2 Nd4 5. Qd1 d6 6. d3 Be7",
+                      moves: "1. e4 e5 2. Qh5 Nc6 3. Bc4 Nf6 4. Qxh7 Nxh7 5. Nf3 d6 6. d3 Be7",
                       status: "resign", clockData: GameClockData(initialSeconds: 300, incrementSeconds: 3,
                           remainingCentiseconds: [30_000, 30_000, 29_900, 29_750, 29_100, 29_500, 28_700, 28_900, 27_800, 27_500, 27_000, 26_800])),
             ChessGame(id: "demo-queen-loss", username: "You", white: "Practice partner", black: "You",
@@ -223,7 +257,10 @@ public enum DemoContent {
             ChessGame(id: "demo-back-rank", username: "You", white: "You", black: "Practice partner",
                       playedAt: now.addingTimeInterval(-10_800), playerSide: .white,
                       moves: "1. Re7 Rb1+ 2. Re1 Rxe1#",
-                      initialFEN: "6k1/5ppp/8/8/8/8/1r3PPP/4R1K1 w - - 0 1", status: "mate")
+                      initialFEN: "6k1/5ppp/8/8/8/8/1r3PPP/4R1K1 w - - 0 1", status: "mate"),
+            ChessGame(id: "demo-king-safety", username: "You", white: "You", black: "Practice partner",
+                      playedAt: now.addingTimeInterval(-14_400), playerSide: .white,
+                      moves: "1. f3 e5 2. g4 Qh4#", status: "mate", speed: .rapid)
         ]
     }
 }

@@ -1,30 +1,27 @@
 import SwiftUI
 import ChessMeCore
 
-private enum ReviewedGameFilter: String, CaseIterable {
-    case all = "All", cloud = "Cloud", local = "Local"
-    var source: String? {
-        switch self { case .all: nil; case .cloud: "cloud"; case .local: "device" }
+enum ReviewedGameFilter: String, CaseIterable {
+    case all = "All", reviewed = "Reviewed", local = "Local reviewed", cloud = "Cloud reviewed"
+    var key: String { switch self { case .all: "all"; case .reviewed: "reviewed"; case .local: "local"; case .cloud: "cloud" } }
+    var source: String? { switch self { case .local: "device"; case .cloud: "cloud"; default: nil } }
+    var symbol: String { switch self { case .all: "books.vertical"; case .reviewed: "checkmark.circle"; case .cloud: "cloud"; case .local: "iphone" } }
+    func includes(game: ChessGame, reviews: [GameAnalysis]) -> Bool {
+        self == .all || reviews.contains { $0.gameID == game.id && $0.isComplete && (source == nil || $0.source == source) }
     }
-    var symbol: String {
-        switch self { case .all: "checkmark.circle"; case .cloud: "cloud"; case .local: "iphone" }
-    }
-    var menuTitle: String { self == .all ? "Reviewed" : rawValue }
 }
 
 struct LibraryView: View {
     @EnvironmentObject private var model: AppModel
     @State private var savedOnly = false
-    @State private var reviewedFilter: ReviewedGameFilter?
+    @State private var reviewedFilter: ReviewedGameFilter = .all
+    @State private var speedFilter: GameSpeedFilter = .all
     @State private var schedule: DeviceAnalysisSchedule?
     @ScaledMetric(relativeTo: .subheadline) private var filterHeight: CGFloat = 44
     private var games: [ChessGame] {
         let candidates = savedOnly ? model.favoriteGames : model.windowGames
-        guard let reviewedFilter else { return candidates }
-        return candidates.filter {
-            guard let review = model.gameAnalysis(for: $0.id), review.isComplete else { return false }
-            return reviewedFilter.source == nil || review.source == reviewedFilter.source
-        }
+        let reviews = model.library.analyses + (model.library.analysisHistory ?? []) + (model.library.localAnalysisJobs ?? []).compactMap(\.checkpoint)
+        return candidates.filter { speedFilter.includes($0) && reviewedFilter.includes(game: $0, reviews: reviews) }
     }
     @Environment(\.chessReduceMotion) private var reduceMotion
     var body: some View {
@@ -62,10 +59,11 @@ struct LibraryView: View {
                             .accessibilityValue(savedOnly ? "Selected" : "Not selected")
                     }
                 }.frame(height: filterHeight)
+                GameSpeedMenu(selection: $speedFilter)
                 if games.isEmpty {
-                    Text(reviewedFilter != nil ? (savedOnly ? "No saved games match this review filter." : "No games match this review filter in this period.") : savedOnly ? "Save a game using the heart in its review." : "Your completed games will appear here after import.")
+                    Text(reviewedFilter != .all || speedFilter != .all ? (savedOnly ? "No saved games match these filters." : "No games match these filters in this period.") : savedOnly ? "Save a game using the heart in its review." : "Your completed games will appear here after import.")
                         .font(.subheadline).foregroundStyle(ChessMeStyle.muted)
-                    if !savedOnly && reviewedFilter == nil {
+                    if !savedOnly && reviewedFilter == .all && speedFilter == .all {
                         PrimaryButton(title: "Import games", symbol: "arrow.down") { model.showConnection = true }
                     }
                 }
@@ -74,12 +72,11 @@ struct LibraryView: View {
                         HStack(spacing: 15) {
                             ChessPieceView(piece: Piece(kind: .king, side: game.playerSide))
                                 .frame(width: 38, height: 38).frame(width: 48, height: 56)
-                                .background((model.outcome(for: game)?.color ?? ChessMeStyle.green).opacity(0.09), in: RoundedRectangle(cornerRadius: 12))
+                                .background(model.outcome(for: game).map { $0.color.opacity(0.82) } ?? ChessMeStyle.green.opacity(0.09), in: RoundedRectangle(cornerRadius: 12))
                             VStack(alignment: .leading, spacing: 6) {
-                                HStack {
-                                    Text(game.opponent).font(.subheadline.weight(.semibold)).lineLimit(1)
-                                    if let outcome = model.outcome(for: game) { GameOutcomeBadge(outcome: outcome).accessibilityIdentifier("game.result.\(game.id)") }
-                                }
+                                GamePlayerNames(game: game, outcome: model.outcome(for: game))
+                                    .accessibilityIdentifier("game.result.\(game.id)")
+                                Text(game.timeControl.title).font(.caption).foregroundStyle(ChessMeStyle.muted)
                                 Text(game.playedAt, format: .dateTime.month(.abbreviated).day().hour().minute())
                                     .font(.caption).foregroundStyle(ChessMeStyle.muted)
                                 if let analysis = model.gameAnalysis(for: game.id) {
@@ -111,21 +108,21 @@ struct LibraryView: View {
             ForEach(ReviewedGameFilter.allCases, id: \.self) { filter in
                 Button { reviewedFilter = filter } label: {
                     Label(filter.rawValue, systemImage: reviewedFilter == filter ? "checkmark" : filter.symbol)
-                }.accessibilityIdentifier("games.reviewed.\(filter.rawValue.lowercased())")
+                }.accessibilityIdentifier("games.reviewed.\(filter.key)")
             }
             Divider()
-            Button("Show all games", systemImage: "xmark.circle") { reviewedFilter = nil }
+            Button("Show all games", systemImage: "xmark.circle") { reviewedFilter = .all }
                 .accessibilityIdentifier("games.reviewed.clear")
         } label: {
             HStack(spacing: 6) {
-                Image(systemName: reviewedFilter?.symbol ?? "checkmark.circle")
-                Text(reviewedFilter?.menuTitle ?? "Reviewed")
+                Image(systemName: reviewedFilter.symbol)
+                Text(reviewedFilter.rawValue)
                 Image(systemName: "chevron.down").font(.caption2)
             }.font(.subheadline).fixedSize(horizontal: true, vertical: false)
                 .padding(.horizontal, 10).frame(height: filterHeight)
-                .foregroundStyle(reviewedFilter == nil ? ChessMeStyle.ink : .white)
-                .background(reviewedFilter == nil ? ChessMeStyle.ink.opacity(0.05) : ChessMeStyle.green, in: Capsule())
+                .foregroundStyle(reviewedFilter == .all ? ChessMeStyle.ink : .white)
+                .background(reviewedFilter == .all ? ChessMeStyle.ink.opacity(0.05) : ChessMeStyle.green, in: Capsule())
         }.accessibilityIdentifier("games.reviewed")
-            .accessibilityLabel("Reviewed games").accessibilityValue(reviewedFilter?.rawValue ?? "Not selected")
+            .accessibilityLabel("Review filter").accessibilityValue(reviewedFilter.rawValue)
     }
 }

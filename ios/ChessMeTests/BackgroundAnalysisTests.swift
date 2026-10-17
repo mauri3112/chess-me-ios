@@ -8,10 +8,11 @@ private final class BackgroundTaskFixture: AnalysisBackgroundTask {
     let isContinued = true
     let progress = Progress(totalUnitCount: 0)
     var completions: [Bool] = []
+    var subtitles: [String] = []
     private var expiration: (@Sendable () -> Void)?
     init(_ identifier: String) { self.identifier = identifier }
     func onExpiration(_ handler: @escaping @Sendable () -> Void) { expiration = handler }
-    func updateTitle(_ title: String, subtitle: String) {}
+    func updateTitle(_ title: String, subtitle: String) { subtitles.append(subtitle) }
     func complete(success: Bool) { completions.append(success) }
     func expire() { expiration?() }
 }
@@ -25,10 +26,11 @@ final class BackgroundAnalysisTests: XCTestCase {
         configuration.depth = 32; configuration.memoryMB = 16; configuration.secondsPerPosition = 3
         configuration.searchNodeLimit = 100_000_000
         let job = LocalAnalysisJob(gameID: game.id, configuration: configuration, level: .balanced)
-        let model = AppModel(previewLibrary: LibrarySnapshot(games: [game], isDemo: true, localAnalysisJobs: [job]))
+        let duplicate = LocalAnalysisJob(gameID: game.id, configuration: configuration, level: .balanced)
+        let model = AppModel(previewLibrary: LibrarySnapshot(games: [game], isDemo: true, localAnalysisJobs: [job, duplicate]))
         let coordinator = DeviceAnalysisCoordinator(model: model, schedulerEnabled: false)
         defer { coordinator.pause() }
-        coordinator.prepareContinuedRequest(identifier: "progress-request", jobIDs: [job.id])
+        coordinator.prepareContinuedRequest(identifier: "progress-request", jobIDs: [job.id, duplicate.id])
         let task = BackgroundTaskFixture("progress-request")
         await coordinator.accept(task)
         for _ in 0..<200 where task.progress.completedUnitCount == 0 {
@@ -43,6 +45,7 @@ final class BackgroundAnalysisTests: XCTestCase {
         XCTAssertTrue(task.progress.isFinished)
         XCTAssertTrue(model.library.localAnalysisJobs?.first?.checkpoint?.isComplete == true)
         XCTAssertEqual(model.progress, 1)
+        XCTAssertEqual(task.subtitles, ["Reviewing game 1/1", "Reviewed 1/1 games"])
     }
 
     @MainActor

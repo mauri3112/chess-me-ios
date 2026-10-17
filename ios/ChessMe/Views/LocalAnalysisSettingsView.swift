@@ -18,6 +18,15 @@ struct LocalAnalysisSettingsView: View {
                      : LocalAnalysisLevel.balanced.requirement)
             }
             Section {
+                ForEach(GameSpeed.allCases.filter { $0 != .unknown }) { speed in
+                    Toggle(speed.title, isOn: Binding(get: { model.automaticReviewSpeeds.contains(speed) }, set: { enabled in
+                        if enabled { model.automaticReviewSpeeds.insert(speed) } else { model.automaticReviewSpeeds.remove(speed) }
+                    })).accessibilityIdentifier("analysis.automatic.\(speed.rawValue)")
+                }
+            } header: { Text("Automatic deeper reviews") } footer: {
+                Text("Rapid and classical are included by default. Blitz, bullet and games with an unknown time control get a quick initial review. Choose any game manually for deeper analysis in Games.")
+            }
+            Section {
                 ForEach(LocalAnalysisLevel.allCases) { level in
                     let estimate = model.nightEstimate(level)
                     Button {

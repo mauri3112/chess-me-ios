@@ -68,12 +68,17 @@ private struct QueueSpinner: View {
     }
 }
 
-struct GameOutcomeBadge: View {
-    let outcome: PlayerGameOutcome
+struct GamePlayerNames: View {
+    let game: ChessGame
+    let outcome: PlayerGameOutcome?
+    var prominent = false
+    private var opponentOutcome: PlayerGameOutcome? { outcome == .won ? .lost : outcome == .lost ? .won : outcome }
     var body: some View {
-        Label(outcome.title, systemImage: outcome.symbol).font(.caption2.weight(.semibold))
-            .foregroundStyle(outcome.color).padding(.horizontal, 7).padding(.vertical, 4)
-            .background(outcome.color.opacity(0.09), in: Capsule())
-            .accessibilityLabel("You \(outcome == .draw ? "drew" : outcome.rawValue)")
+        let player = Text(game.playerSide == .white ? game.white : game.black).foregroundColor(outcome?.color ?? ChessMeStyle.ink)
+        let opponent = Text(game.opponent).foregroundColor(opponentOutcome?.color ?? ChessMeStyle.ink)
+        let versus = Text("vs").foregroundColor(ChessMeStyle.muted)
+        Text("\(player) \(versus) \(opponent)")
+            .font(prominent ? ChessMeStyle.title(24) : .subheadline.weight(.semibold)).lineLimit(1)
+            .accessibilityLabel("\(game.reviewLabel)\(outcome.map { ", you \($0 == .draw ? "drew" : $0.rawValue)" } ?? "")")
     }
 }

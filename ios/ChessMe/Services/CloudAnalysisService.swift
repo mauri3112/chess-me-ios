@@ -431,6 +431,7 @@ struct AnalysisResponse: Decodable, Sendable {
         let bestMove: String
         let centipawnLoss: Int
         let whiteScore: Int
+        var bestWhiteScore: Int? = nil
         let completedDepth: Int
     }
     var move_assessments: [Assessment]? = nil
@@ -495,16 +496,16 @@ struct AnalysisResponse: Decodable, Sendable {
             assessments = try values.map { value in
                 guard let (board, played) = positionsByPly[value.ply], board.fen == value.positionFEN,
                       played == value.playedMove, (0...20000).contains(value.centipawnLoss),
-                      (-10000...10000).contains(value.whiteScore), (0...256).contains(value.completedDepth),
+                      (-10000...10000).contains(value.whiteScore), value.bestWhiteScore.map({ (-10000...10000).contains($0) }) ?? true, (0...256).contains(value.completedDepth),
                       board.legalMoves().contains(where: { $0.uci == value.bestMove }) else { throw CloudError.invalidResponse }
                 return MoveAssessment(ply: value.ply, positionFEN: value.positionFEN, playedMove: played,
                     bestMove: value.bestMove, quality: value.completedDepth < 2 ? .unclassified : .estimated(loss: value.centipawnLoss, isBest: played == value.bestMove),
                     centipawnLoss: value.centipawnLoss, whiteScore: value.whiteScore,
-                    completedDepth: value.completedDepth, isProvisional: value.completedDepth < 2)
+                    completedDepth: value.completedDepth, isProvisional: value.completedDepth < 2, bestWhiteScore: value.bestWhiteScore)
             }
         }
-        return GameAnalysis(gameID: game_id, findings: mapped, analyzedPlies: analyzed_plies,
+        return ReviewMovePolicy.normalizing(GameAnalysis(gameID: game_id, findings: mapped, analyzedPlies: analyzed_plies,
                             totalPlies: total_plies, source: "cloud", completedAt: analyzed_at,
-                            engineVersion: engine_version, configurationID: configuration_id, moveAssessments: assessments)
+                            engineVersion: engine_version, configurationID: configuration_id, moveAssessments: assessments))
     }
 }

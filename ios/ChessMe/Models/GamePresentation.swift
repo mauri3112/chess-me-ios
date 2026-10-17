@@ -11,8 +11,8 @@ enum DeviceAnalysisSchedule: String, Identifiable {
 extension PlayerGameOutcome {
     var color: Color {
         switch self {
-        case .won: ChessMeStyle.green
-        case .lost: Color(red: 0.72, green: 0.20, blue: 0.20)
+        case .won: Color(red: 0.0, green: 0.52, blue: 0.24)
+        case .lost: Color(red: 0.85, green: 0.12, blue: 0.16)
         case .draw: ChessMeStyle.muted
         }
     }

@@ -118,6 +118,7 @@ struct SampleNotice: View {
 struct ReviewProgressView: View {
     var showsBulkReviewAction = true
     var showsGameQueue = false
+    var showsCoverage = true
     @EnvironmentObject private var model: AppModel
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -141,7 +142,7 @@ struct ReviewProgressView: View {
             if let message = model.syncMessage {
                 Text(message).font(.caption).foregroundStyle(ChessMeStyle.green).accessibilityIdentifier("review.syncStatus")
             }
-            if let coverage = model.library.coverageNote { Text(coverage).font(.caption).foregroundStyle(ChessMeStyle.muted) }
+            if showsCoverage, let coverage = model.library.coverageNote { Text(coverage).font(.caption).foregroundStyle(ChessMeStyle.muted) }
         }
     }
 }
@@ -183,7 +184,8 @@ private struct TodayAnalysisQueueView: View {
         }.accessibilityIdentifier("today.analysis.open.\(game.id)")
     }
     private func status(for game: ChessGame) -> String {
-        if let job = model.localAnalysisJob(for: game.id, includingOrdinary: true), job.isPending {
+        if let job = model.localAnalysisJob(for: game.id, includingOrdinary: true), job.isPending,
+           model.completeDeviceReview(for: game.id, covering: job.configuration) == nil {
             if job.state == .running { return "Analyzing on this device" }
             return job.nightOnly ? "Tonight on this device" : "Queued on this device"
         }
@@ -214,17 +216,30 @@ struct ReviewView: View {
                         Spacer()
                         Button("View games") { model.selectedTab = AppTab.games.rawValue }.font(.subheadline.weight(.medium))
                     }.accessibilityIdentifier("home.summary")
-                    ReviewProgressView(showsGameQueue: true)
+                    ReviewProgressView(showsGameQueue: true, showsCoverage: false)
                     if model.currentCloudReviews.contains(where: \.isPending) {
                         Button { model.showCloudSetup = true } label: { Label("Cloud reviews in progress", systemImage: "cloud") }
                             .accessibilityIdentifier("cloud.open")
                     }
                 }
+                quickPractice
                 if let notice = model.notice { Text(notice).font(.footnote).foregroundStyle(ChessMeStyle.muted) }
             }.padding(24)
         }
         .accessibilityIdentifier("main.scroll").background(ChessMeStyle.paper)
         .toolbar(.hidden, for: .navigationBar)
+    }
+
+    private var quickPractice: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Play and practise").font(ChessMeStyle.title(22))
+            NavigationLink { PuzzlesView() } label: {
+                Label("Play puzzles", systemImage: "puzzlepiece.extension").frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+            }.accessibilityIdentifier("today.puzzles")
+            NavigationLink { OpeningCoachView() } label: {
+                Label("Opening practice", systemImage: "flag.checkered").frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+            }.accessibilityIdentifier("today.openings")
+        }.font(.subheadline.weight(.semibold)).foregroundStyle(ChessMeStyle.green)
     }
 
     private var welcome: some View {
@@ -250,7 +265,7 @@ struct ReviewView: View {
                     HStack {
                         Text("Your next lesson").font(ChessMeStyle.title(24))
                         Spacer()
-                        Text(next.source == "cloud" ? "Cloud" : "On device").font(.caption).foregroundStyle(ChessMeStyle.muted)
+                        if next.source == "cloud" { Text("Cloud").font(.caption).foregroundStyle(ChessMeStyle.muted) }
                     }
                     HStack(spacing: 16) {
                         ChessBoardView(position: (try? ChessPosition(fen: next.positionFEN)) ?? .initial)

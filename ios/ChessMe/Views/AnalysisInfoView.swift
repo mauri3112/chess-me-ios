@@ -5,17 +5,17 @@ struct AnalysisInfoView: View {
     var body: some View {
         List {
             Section("On your device") {
-                Text("Stockfish 19 and Arasan 26 are bundled with their neural networks for offline analysis. ChessMe Tactical and Material are lighter alternatives. Overnight Stockfish reviews save decisions and can resume while charging.")
+                Text("Stockfish 19 and its neural network are bundled for offline analysis. Overnight Stockfish reviews save decisions and can resume while charging.")
                 Text("Scores, move labels and brilliant candidates are estimates. More time can change the result. The evaluation bar shows an advantage in pawns, rather than a win probability.")
             }
             Section("Practice") {
                 Text("Lessons start without engine suggestions. Asking for a hint, opening analysis or exploring marks that solve as guided. Guided solves return sooner; unaided solves extend your practice streak.")
             }
             Section("Cloud") {
-                Text("Cloud Stockfish runs on a separately configured server. Cloud reviews require a verified subscription and remaining allowance. Live board analysis always uses your selected device engine.")
+                Text("Cloud Stockfish runs on a separately configured server. Cloud reviews require a verified subscription and remaining allowance. Live board analysis always uses Stockfish on this device.")
             }
             Section("Related puzzles and openings") {
-                Text("Book moves follow the offline Lichess catalogue of \(OpeningBook.shared.openingCount.formatted()) opening lines and variations. Theory ends at the recorded length of each line. Known positions also recognize transpositions. Book moves do not count as engine mistakes; verified forced-mate errors remain visible.")
+                Text("Book moves follow the offline Lichess catalogue of \(OpeningBook.shared.openingCount.formatted()) opening lines and variations. Theory ends at the recorded length of each line. Known positions also recognize transpositions. Ordinary book moves do not become mistake lessons; verified blunders remain visible.")
                 Text("Lichess puzzles come from its CC0 database. Matching uses estimated tactical themes, your puzzle level and failed attempts. Solve the whole line; asking for help keeps the attempt guided.")
                 Text("Opening advice starts after 30 sufficiently reviewed standard games. It requires repeated losses at the same position and agreement on a suggested move. These are engine estimates.")
             }

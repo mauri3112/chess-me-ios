@@ -1,6 +1,6 @@
 # ChessMe iOS source
 
-Corresponding client source for ChessMe 0.2.0 build 24, tag `ios-0.2.0-build24`.
+Corresponding client source for ChessMe 0.2.0 build 25, tag `ios-0.2.0-build25`.
 The original iOS app and shared core use GNU GPL version 3 only. See LICENSE and
 CLIENT-LICENSE.md. Third-party notices and compatible licences remain intact.
 The cloud backend is separately operated and is not included here.
@@ -24,7 +24,8 @@ registration when you change the registered client and callback configuration.
 Stockfish 19 source, the native bridge and platform build flags are in
 Vendor/Stockfish. Exact NNUE networks and licence resources are included in
 Sources/ChessMeCore/Resources. Stockfish's network checksum and pinned upstream
-commit are in Vendor/Stockfish/provenance.json. Arasan 26 remains an alternative.
+commit are in Vendor/Stockfish/provenance.json. Historical engine sources and
+notices remain included for saved-library compatibility.
 Asset-generation sources are included under docs/design.
 
 The full CC0 Lichess opening catalogue is pinned in Vendor/LichessOpenings.
@@ -32,8 +33,11 @@ Its offline position/move index is Sources/ChessMeCore/Resources/OpeningBook.jso
 To reproduce the index, run `uv run --with python-chess python
 scripts/generate-opening-book.py` (one command on one line). Source checksums
 are verified before generation. Book labels preserve engine scores and exclude
-opening theory from mistake cards, counts and recommendations. Verified mate
-errors in named traps remain visible. Recognition follows each recorded line's
+opening theory from mistake cards, counts and recommendations. Through move 12,
+only practical blunders become lessons. Blunder grading uses winning-chance loss
+and practical losing-position gates. OpeningEvaluations.json caches exact
+Stockfish/history/configuration matches; its builder and provenance are included.
+Other positions and deeper profiles fall back to Stockfish. Recognition follows each recorded line's
 length and supports transpositions without restarting theory after repetitions.
 
 Settings > On-device analysis offers depth targets 24, 28 and 32 on supported
@@ -54,11 +58,13 @@ Games > Add for analysis lets users choose night or immediate device analysis,
 select individual games and save the selection. Explicit night selections remain
 queued when automatic overnight queuing is disabled. Row icons distinguish
 unreviewed games, night jobs, waiting jobs, active progress and completed reviews.
-Today lists active and queued games with individual progress and links to their
-reviews. Longer queues expand to every game. Reviewed offers All, Cloud and Local
-completed reviews, with Saved to its right and an option to show all games again.
-These filters can be combined; partial reviews remain outside Reviewed. Night
-and immediate scheduling choices open beside Add for analysis. Period labels
+Today offers Puzzles and Opening practice alongside the next lesson. It lists
+active and remaining queued games with links to their reviews. The review filter
+defaults to All games, with Reviewed, Local reviewed and Cloud reviewed options.
+Time-control filters apply to imports, games and manual analysis selection.
+Automatic bullet and blitz reviews use a quick budget unless deeper analysis is
+requested manually or enabled in settings. Saved combines with the other filters.
+Night and immediate scheduling choices open beside Add for analysis. Period labels
 keep their full text, and long opponent names truncate without squeezing Explore.
 Recorded results determine win/loss colors; engine evaluations never infer a
 winner. Practice browsing and trial branches keep the original game intact.

@@ -205,6 +205,8 @@ private struct CloudGamePicker: View {
     @Environment(\.dismiss) private var dismiss
     @State private var selection: Set<String> = []
     @State private var confirm = false
+    @State private var speedFilter: GameSpeedFilter = .all
+    private var candidates: [ChessGame] { model.cloudCandidateGames.filter { speedFilter.includes($0) } }
     private var limit: Int { model.cloudAccount?.quotaRemaining ?? 0 }
     var body: some View {
         NavigationStack {
@@ -212,12 +214,13 @@ private struct CloudGamePicker: View {
                 Section {
                     Text("\(selection.count) selected · \(limit) reviews left").font(.headline)
                     Text("One allowance per new review. Existing saved and pending reviews are excluded. Games are submitted newest first.").font(.caption)
-                    Button("Select newest \(min(limit, model.cloudCandidateGames.count)) games") {
-                        selection = Set(model.cloudCandidateGames.prefix(limit).map(\.id))
+                    GameSpeedMenu(selection: $speedFilter, identifier: "cloud.speed")
+                    Button("Select newest \(min(limit, candidates.count)) games") {
+                        selection = Set(candidates.prefix(limit).map(\.id))
                     }.disabled(limit == 0)
                     Button("Clear selection") { selection = [] }.disabled(selection.isEmpty)
                 }
-                ForEach(model.cloudCandidateGames) { game in
+                ForEach(candidates) { game in
                     Button {
                         if selection.contains(game.id) { selection.remove(game.id) }
                         else if selection.count < limit { selection.insert(game.id) }
@@ -232,8 +235,9 @@ private struct CloudGamePicker: View {
                         }
                     }.accessibilityValue(selection.contains(game.id) ? "Selected" : "Not selected")
                 }
-                if model.cloudCandidateGames.isEmpty { Text("No new games in this period. Import more games in Cloud reviews.") }
+                if candidates.isEmpty { Text("No new games in this period. Import more games in Cloud reviews.") }
             }
+            .onChange(of: speedFilter) { _, _ in selection.formIntersection(Set(candidates.map(\.id))) }
             .navigationTitle("Choose games").navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) { Button("Cancel") { dismiss() } }

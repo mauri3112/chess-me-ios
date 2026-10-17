@@ -32,7 +32,7 @@ public struct AnalysisOptions: Sendable {
     }
 }
 
-public struct MoveEvaluation: Equatable, Sendable {
+public struct MoveEvaluation: Codable, Equatable, Sendable {
     public let move: ChessMove
     /// Centipawns from the side-to-move's perspective, or a mate score near 100,000.
     public let score: Int
@@ -41,7 +41,7 @@ public struct MoveEvaluation: Equatable, Sendable {
     public var isLosingMate: Bool { score < -90_000 }
 }
 
-public struct PositionEvaluation: Sendable {
+public struct PositionEvaluation: Codable, Sendable {
     public let moves: [MoveEvaluation]
     public let completedDepth: Int
     public let nodes: Int
@@ -200,7 +200,9 @@ public struct LocalAnalyzer: Sendable {
         let missedMate = best.isWinningMate && !actual.isWinningMate
         let allowsMate = actual.isLosingMate && !best.isLosingMate
         let loss = missedMate || allowsMate ? 1_000 : max(0, best.score - actual.score)
-        guard loss >= options.minimumLoss else { return nil }
+        let quality = ReviewMovePolicy.quality(bestScore: best.score, playedScore: actual.score)
+        guard loss >= options.minimumLoss,
+              ReviewMovePolicy.permitsLesson(bestScore: best.score, quality: quality, moveNumber: position.fullmoveNumber) else { return nil }
         let accepted: [MoveEvaluation]
         if best.isWinningMate { accepted = evaluation.moves.filter { $0.isWinningMate } }
         else { accepted = evaluation.moves.filter { !$0.isLosingMate && best.score - $0.score <= options.alternativeTolerance } }
@@ -240,7 +242,7 @@ public struct LocalAnalyzer: Sendable {
                            positionFEN: position.fen, playedMove: played.uci, bestMove: best.move.uci,
                            acceptedMoves: accepted.map { $0.move.uci }, continuation: best.continuation.map(\.uci),
                            centipawnLoss: Double(loss), theme: theme, explanation: explanation,
-                           hint: hint, moveNumber: position.fullmoveNumber, source: "device", isPuzzle: isPuzzle)
+                           hint: hint, moveNumber: position.fullmoveNumber, source: "device", isPuzzle: isPuzzle, quality: quality)
     }
 }
 

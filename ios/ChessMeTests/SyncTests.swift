@@ -4,6 +4,25 @@ import ChessMeCore
 @testable import ChessMe
 
 final class SyncTests: XCTestCase {
+    func testSpeedFilterIsSentToProviderAndRetainedOnGames() async throws {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [SyncProtocol.self]
+        let service = LichessService(client: LichessHTTPClient(session: URLSession(configuration: configuration), gate: LichessRequestGate()))
+        let now = Date()
+        SyncProtocol.handler = { request in
+            XCTAssertEqual(URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?.queryItems?.first { $0.name == "perfType" }?.value, "rapid")
+            let record: [String: Any] = ["id": "rapid-record", "variant": "standard", "speed": "rapid", "createdAt": Int64(now.addingTimeInterval(-60).timeIntervalSince1970 * 1000), "status": "resign", "players": ["white": ["user": ["id": "learner", "name": "Learner"]], "black": ["user": ["id": "other", "name": "Other"]]], "moves": "e4 e5"]
+            var wrong = record; wrong["id"] = "blitz-record"; wrong["speed"] = "blitz"
+            var data = try JSONSerialization.data(withJSONObject: record); data.append(10)
+            data.append(try JSONSerialization.data(withJSONObject: wrong)); data.append(10)
+            return (200, data)
+        }
+        let result = try await service.importGames(username: "Learner", window: .day, consented: true, now: now, speedFilter: .rapid)
+        XCTAssertEqual(result.games.map(\.id), ["rapid-record"])
+        XCTAssertEqual(result.games.first?.timeControl, .rapid)
+        XCTAssertTrue(result.isComplete)
+    }
+
     func testPublicProfileFetchReadsCurrentRatingWithoutAccountCredentialsAndChecksIdentity() async throws {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [SyncProtocol.self]
