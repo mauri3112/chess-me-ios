@@ -32,7 +32,7 @@ final class ChessMeUITests: XCTestCase {
     }
 
     func testTimeControlFiltersGamesAndManualAnalysisSelection() throws {
-        try launchQueueFixture()
+        try launchQueueFixture(pendingJobs: true)
         app.tabBars.buttons["Games"].tap()
         XCTAssertEqual(app.buttons["games.reviewed"].value as? String, "All")
         capture("Games with vivid win and loss colors")
@@ -276,6 +276,9 @@ final class ChessMeUITests: XCTestCase {
         app.launch()
         openPracticeHome()
         app.buttons["practice.puzzles"].tap()
+        XCTAssertTrue(app.buttons["puzzles.play"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["puzzles.play"].isHittable)
+        capture("Related puzzle count without focus card or target level")
         app.buttons["puzzles.play"].tap()
         let reveal = app.buttons["puzzle.reveal"]
         XCTAssertTrue(reveal.waitForExistence(timeout: 10))

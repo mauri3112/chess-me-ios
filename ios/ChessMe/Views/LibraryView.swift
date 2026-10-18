@@ -76,9 +76,11 @@ struct LibraryView: View {
                             VStack(alignment: .leading, spacing: 6) {
                                 GamePlayerNames(game: game, outcome: model.outcome(for: game))
                                     .accessibilityIdentifier("game.result.\(game.id)")
-                                Text(game.timeControl.title).font(.caption).foregroundStyle(ChessMeStyle.muted)
-                                Text(game.playedAt, format: .dateTime.month(.abbreviated).day().hour().minute())
-                                    .font(.caption).foregroundStyle(ChessMeStyle.muted)
+                                HStack(spacing: 6) {
+                                    GameSpeedIcon(speed: game.timeControl)
+                                        .accessibilityIdentifier("game.speed.\(game.id)")
+                                    Text(game.playedAt, format: .dateTime.month(.abbreviated).day().hour().minute())
+                                }.font(.caption).foregroundStyle(ChessMeStyle.muted)
                                 if let analysis = model.gameAnalysis(for: game.id) {
                                     Text("\(analysis.findings.count) key moments")
                                         .font(.caption).foregroundStyle(ChessMeStyle.muted)

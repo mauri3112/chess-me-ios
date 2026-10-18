@@ -37,8 +37,10 @@ struct GameAnalysisSelectionView: View {
                                     .font(.title3).foregroundStyle(covered ? ChessMeStyle.muted : ChessMeStyle.green)
                                 VStack(alignment: .leading, spacing: 5) {
                                     Text(game.reviewLabel).font(.subheadline.weight(.semibold))
-                                    Text(covered ? "Review ready at this depth" : "\(game.timeControl.title) · \(game.playedAt.formatted(date: .abbreviated, time: .shortened))")
-                                        .font(.caption).foregroundStyle(ChessMeStyle.muted)
+                                    HStack(spacing: 6) {
+                                        GameSpeedIcon(speed: game.timeControl)
+                                        Text(covered ? "Review ready at this depth" : game.playedAt.formatted(date: .abbreviated, time: .shortened))
+                                    }.font(.caption).foregroundStyle(ChessMeStyle.muted)
                                 }
                                 Spacer()
                                 GameAnalysisIndicator(game: game)
@@ -47,7 +49,7 @@ struct GameAnalysisSelectionView: View {
                                 .contentShape(Rectangle())
                         }.buttonStyle(.automatic).disabled(covered)
                             .accessibilityElement(children: .ignore)
-                            .accessibilityLabel(game.reviewLabel)
+                            .accessibilityLabel("\(game.reviewLabel), \(game.timeControl.title)")
                             .accessibilityValue(covered ? "Review ready at this depth" : selected.contains(game.id) ? "Selected" : "Not selected")
                             .accessibilityIdentifier("analysis.select.\(game.id)")
                             .accessibilityAddTraits(.isButton)

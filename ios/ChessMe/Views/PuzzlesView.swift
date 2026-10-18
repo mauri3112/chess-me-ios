@@ -5,10 +5,12 @@ struct PuzzlesView: View {
     @EnvironmentObject private var model: AppModel
     @State private var playingPuzzle: TrainingPuzzle?
     var body: some View {
+        let puzzles = model.recommendedPuzzles
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 22) {
-                Text("Puzzles matched to the ideas in your games.")
+                Text("Found \(puzzles.count) \(puzzles.count == 1 ? "puzzle" : "puzzles") related to positions in your games.")
                     .font(.subheadline).foregroundStyle(ChessMeStyle.muted)
+                    .accessibilityIdentifier("puzzles.matchesSummary")
                 if model.isDemo {
                     Label("Demo · sample puzzle", systemImage: "eye")
                         .font(.caption).foregroundStyle(ChessMeStyle.muted)
@@ -17,20 +19,7 @@ struct PuzzlesView: View {
                     PrimaryButton(title: "Play next puzzle", symbol: "play.fill") { playingPuzzle = puzzle }
                         .accessibilityIdentifier("puzzles.play")
                 }
-                if !model.puzzleFocus.isEmpty {
-                    PaperCard {
-                        VStack(alignment: .leading, spacing: 10) {
-                            Text("Your practice focus").font(.subheadline.weight(.semibold))
-                            ForEach(Array(model.puzzleFocus.prefix(3)), id: \.theme) { item in
-                                Text(PuzzleTheme.title(item.theme)).font(.subheadline).foregroundStyle(ChessMeStyle.green)
-                            }
-                            Text("Based on your reviews and practice.")
-                                .font(.caption).foregroundStyle(ChessMeStyle.muted)
-                        }
-                    }
-                }
                 HStack {
-                    Text("Level \(model.puzzleTargetRating)").font(.caption.monospacedDigit())
                     Spacer()
                     Button { Task { await model.refreshPuzzleMatches(force: true) } } label: {
                         Label("Refresh matches", systemImage: "arrow.clockwise")
@@ -48,7 +37,7 @@ struct PuzzlesView: View {
                         .font(.subheadline).foregroundStyle(ChessMeStyle.muted)
                     if model.library.games.isEmpty { PrimaryButton(title: "Import games", symbol: "arrow.down") { model.showConnection = true } }
                 }
-                ForEach(model.recommendedPuzzles) { puzzle in
+                ForEach(puzzles) { puzzle in
                     PuzzleRow(puzzle: puzzle)
                     Divider()
                 }
