@@ -37,6 +37,7 @@ struct RootView: View {
             model.resetCloudAccess()
             if let account { model.adoptPuzzleLevel(from: account) }
         }
+        .onChange(of: scenePhase) { _, phase in if phase != .active { model.flushNavigationSave() } }
         .overlayPreferenceValue(LogoFramePreference.self) { anchors in
             GeometryReader { geometry in
                 if launching, let anchor = anchors[model.selectedTab] {

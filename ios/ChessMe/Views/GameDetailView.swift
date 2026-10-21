@@ -85,16 +85,13 @@ struct GameReplayExplorer: View {
                 HStack(alignment: .center, spacing: 12) {
                     Group {
                     if useStoredSnapshot {
-                        Text("Position exploration").font(ChessMeStyle.title(26))
-                        Text("Stored context · moves tried here are variations, not a played source-game continuation.").font(.caption)
+                        Text("Explore continuation").font(ChessMeStyle.title(22))
                     } else {
                         GamePlayerNames(game: savedGame, outcome: model.outcome(for: savedGame), prominent: true)
                     }
                     }
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .accessibilityIdentifier("game.match")
-                    Button("Return to review") { dismiss() }.font(.subheadline.weight(.semibold)).fixedSize(horizontal: true, vertical: false)
-                        .frame(minHeight: 44).accessibilityIdentifier("game.explore")
                 }
                 if let opening = openingLine?.opening {
                     VStack(alignment: .leading, spacing: 4) {
@@ -122,6 +119,7 @@ struct GameReplayExplorer: View {
                     AnalysisBoardView(position: replay.position, perspective: game.playerSide, selectedSquare: selected,
                                       targets: targets, highlightedSquares: replay.previousMove.map { [$0.from, $0.to] } ?? [],
                                       moveMarker: assessment.flatMap { [.blunder, .mistake, .inaccuracy].contains($0.quality) ? BoardMoveMarker(square: replay.previousMove?.to ?? 0, quality: $0.quality) : nil },
+                                      suggestions: evaluation?.goodMoves(in: replay.position) ?? [],
                                       evaluation: evaluation, topMoves: model.effectiveEngineConfiguration.topMoves, onSquare: chooseSquare)
                     }
                     if !exploring, let moment {
@@ -155,6 +153,12 @@ struct GameReplayExplorer: View {
                                 .disabled(replay.index == 0 && !replay.isVariation).accessibilityLabel(replay.isVariation ? "Undo variation move" : "Previous move")
                                 .accessibilityIdentifier("game.previous")
                             Spacer()
+                            LiveAnalysis(controller: analyzer, position: replay.position) { evaluation in
+                                BoardIconButton(title: "Play best move", symbol: "play.fill") {
+                                    if let move = evaluation?.best?.move { play(move) }
+                                }.disabled(evaluation?.best == nil)
+                                    .accessibilityIdentifier("game.bestMove")
+                            }
                             Text(replay.isVariation ? "Variation · \(replay.variationMoves.count) \(replay.variationMoves.count == 1 ? "ply" : "plies")" : (replay.index == 0 ? "Starting position" : "Ply \(replay.index)/\(replay.moves.count)"))
                                 .font(.caption.monospacedDigit()).accessibilityIdentifier("game.position")
                             Spacer()
@@ -195,14 +199,15 @@ struct GameReplayExplorer: View {
                             let rootFinding = analysis?.findings.first { $0.positionFEN == replay.position.fen }
                             if let rootFinding {
                                 VStack(alignment: .leading, spacing: 10) {
-                                    Text("Compare from this position").font(.subheadline.weight(.semibold))
+                                    Menu {
                                     Button("Play the game's choice") {
                                         if let move = try? ChessMove(uci: rootFinding.playedMove) { play(move) }
                                     }.accessibilityIdentifier("game.comparePlayed")
                                     Button("Play the saved suggestion") {
                                         if let move = try? ChessMove(uci: rootFinding.bestMove) { play(move) }
                                     }.accessibilityIdentifier("game.compareSuggested")
-                                    Text("Or play your own move. Explain this move compares it at the same root with the game's history.").font(.caption)
+                                    } label: { Label("Compare moves", systemImage: "arrow.left.arrow.right") }
+                                        .buttonStyle(.bordered).accessibilityIdentifier("game.compareOptions")
                                 }
                             }
                         }
@@ -215,20 +220,19 @@ struct GameReplayExplorer: View {
                                         (model.isDemo ? "Saved in sample collection" : "Saved on this device") : nil
                                 }.accessibilityIdentifier("game.saveLine")
                                 Spacer()
-                                Button("Explain this move") { explainSelectedMove(replay) }
+                                BoardIconButton(title: "Explain this move", symbol: "questionmark.circle") { explainSelectedMove(replay) }
                                     .disabled(explainingMove).accessibilityIdentifier("game.explainMove")
+                                BoardIconButton(title: "Return to game", symbol: "arrow.uturn.backward") { parkedVariation = replay; navigate(replay.index) }
+                                    .accessibilityIdentifier("game.return")
                             }.frame(minHeight: 44)
                             if let lineSaveMessage { Text(lineSaveMessage).font(.caption).accessibilityIdentifier("game.lineSaved") }
                             if explainingMove { ProgressView("Checking this move") }
                             if let moveExplanation { Text(moveExplanation).font(.subheadline).accessibilityIdentifier("game.moveExplanation") }
                             ReviewSaveNotice()
-                            Button("Return to game") { parkedVariation = replay; navigate(replay.index) }.font(.subheadline.weight(.semibold))
-                                .accessibilityIdentifier("game.return")
                         } else {
                             if let parkedVariation {
                                 Button("Back to my line") { self.replay = parkedVariation }
                                     .accessibilityIdentifier("game.restoreLine")
-                                Button("Discard temporary line") { self.parkedVariation = nil }
                             }
                             Slider(value: Binding(get: { Double(self.replay?.index ?? 0) }, set: { navigate(Int($0)) }), in: 0...Double(max(1, replay.moves.count)), step: 1)
                                 .accessibilityLabel("Game move").accessibilityIdentifier("game.timeline")
@@ -243,7 +247,6 @@ struct GameReplayExplorer: View {
                             }
                         }
                         if exploring {
-                            Toggle("Engine replies", isOn: $engineReplies).font(.subheadline).accessibilityIdentifier("game.engineReplies")
                             AnalysisPanel(position: replay.position, controller: analyzer, configuration: model.effectiveEngineConfiguration)
                         }
                     }
@@ -278,10 +281,6 @@ struct GameReplayExplorer: View {
                     Text(LocalAnalysisLevel.balanced.requirement).font(.caption)
                     Button("Run an ordinary device review") { analyzer.stop(); model.analyzePending(gameID: game.id) }
                         .disabled(model.isBusy)
-                }
-                if exploring {
-                    Button { showEngineSettings = true } label: { Label("Analysis engines", systemImage: "slider.horizontal.3") }
-                        .font(.subheadline).accessibilityIdentifier("game.engines")
                 }
                 if let analysis {
                     if exploring {
@@ -325,9 +324,28 @@ struct GameReplayExplorer: View {
         }
         .background(ChessMeStyle.paper)
         .accessibilityIdentifier("game.scroll")
-        .navigationTitle("Game review").navigationBarTitleDisplayMode(.inline)
+        .navigationTitle("Explore").navigationBarTitleDisplayMode(.inline)
+        .navigationBarBackButtonHidden(true)
         .toolbar(.visible, for: .navigationBar)
-        .toolbar { ToolbarItem(placement: .topBarTrailing) { FavoriteButton(selected: model.isFavorite(game)) { model.toggleFavorite(game) } } }
+        .toolbar {
+            ToolbarItem(placement: .topBarLeading) {
+                BoardIconButton(title: "Return to review", symbol: "chevron.left") { dismiss() }.accessibilityIdentifier("game.explore")
+            }
+            ToolbarItem(placement: .topBarTrailing) {
+                Menu {
+                    Toggle("Engine replies", isOn: $engineReplies).accessibilityIdentifier("game.engineReplies")
+                    Button("Reset variation", systemImage: "arrow.counterclockwise") {
+                        if let replay { navigate(replay.index) }; parkedVariation = nil
+                    }.disabled(replay?.isVariation != true && parkedVariation == nil).accessibilityIdentifier("game.resetVariation")
+                    Button("Discard temporary line") { parkedVariation = nil }
+                        .disabled(parkedVariation == nil)
+                    Button("Analysis settings", systemImage: "slider.horizontal.3") { showEngineSettings = true }
+                        .accessibilityIdentifier("game.engines")
+                    Button(model.isFavorite(game) ? "Remove from saved games" : "Save game", systemImage: "heart") { model.toggleFavorite(game) }
+                } label: { Image(systemName: "ellipsis.circle").frame(width: 44, height: 44) }
+                    .accessibilityLabel("Explore options").accessibilityIdentifier("game.options")
+            }
+        }
         .task {
             contextGeneration = model.reviewGeneration
             do {
@@ -457,7 +475,7 @@ struct GameReplayExplorer: View {
     }
     private func play(_ move: ChessMove) {
         guard let replay else { return }
-        variationAssessment = analyzer.evaluation?.assessment(position: replay.position, played: move, ply: replay.index + replay.variationMoves.count)
+        variationAssessment = analyzer.evaluation(for: replay.position)?.assessment(position: replay.position, played: move, ply: replay.index + replay.variationMoves.count)
         do {
             try self.replay?.play(move)
             if let trial = self.replay, let assessment = variationAssessment {

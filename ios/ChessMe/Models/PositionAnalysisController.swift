@@ -103,10 +103,23 @@ final class PositionAnalysisController: ObservableObject {
     }
 
     func evaluateAttempt(move: ChessMove, position: ChessPosition, history: [String] = [], configuration: DeviceEngineConfiguration) async throws -> PositionEvaluation {
+        var configuration = configuration
+        configuration.depth = max(ReviewMoveAcceptance.minimumDepth, configuration.depth)
+        let key = position.fen + configuration.options.configurationID + history.joined()
+        if let cached = cache[key], cached.0.completedDepth >= ReviewMoveAcceptance.minimumDepth,
+           cached.0.moves.contains(where: { $0.move == move }) {
+            if case .ungraded = ReviewMoveAcceptance.judge(move: move, position: position, evaluation: cached.0) {} else { return cached.0 }
+        }
+        let options = configuration.options
         let work = Task.detached(priority: .utility) {
-            try LocalAnalyzer(options: configuration.options).evaluate(
+            try LocalAnalyzer(options: options).evaluate(
                 position: position, repetitionHistory: history, requiredMove: move, cancellation: { Task.isCancelled })
         }
-        return try await withTaskCancellationHandler(operation: { try await work.value }, onCancel: { work.cancel() })
+        let result = try await withTaskCancellationHandler(operation: { try await work.value }, onCancel: { work.cancel() })
+        try Task.checkCancellation()
+        cache[key] = (result, Self.formatLines(result, position: position))
+        cacheOrder.removeAll { $0 == key }; cacheOrder.append(key)
+        if cacheOrder.count > 24 { cache.removeValue(forKey: cacheOrder.removeFirst()) }
+        return result
     }
 }

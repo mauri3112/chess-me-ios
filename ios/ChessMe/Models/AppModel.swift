@@ -91,7 +91,9 @@ final class AppModel: ObservableObject {
         didSet { cloudEngineConfiguration.save() }
     }
     var reviewGeneration = UUID()
-    var reviewJourneyCache: [String: ReviewJourney] = [:]
+    var reviewJourneyCache: [String: (game: ChessGame, analysis: GameAnalysis?, journey: ReviewJourney)] = [:]
+    private var navigationSave: Task<Void, Never>?
+    private var navigationSaveTicket = UUID()
     @Published var reviewSaveError: String?
     @Published var notice: String?
     @Published private(set) var isImporting = false
@@ -115,14 +117,14 @@ final class AppModel: ObservableObject {
     private let usesEphemeralLibrary: Bool
     private var clockFetches: [String: Task<ChessGame, Error>] = [:]
 
-    init(previewLibrary: LibrarySnapshot? = nil, puzzleService: PuzzleService = PuzzleService(), lichessService: LichessService = LichessService(), cloud: CloudAnalysisService = CloudAnalysisService()) {
+    init(previewLibrary: LibrarySnapshot? = nil, puzzleService: PuzzleService = PuzzleService(), lichessService: LichessService = LichessService(), cloud: CloudAnalysisService = CloudAnalysisService(), libraryStorage: LocalLibrary? = nil) {
         self.cloud = cloud
         self.puzzleService = puzzleService
         self.lichessService = lichessService
         usesEphemeralLibrary = previewLibrary != nil
         if let previewLibrary { library = previewLibrary; normalizeOpeningReviews(); return }
         do {
-            let storage = try LocalLibrary()
+            let storage = try libraryStorage ?? LocalLibrary()
             do {
                 library = try storage.load()
                 self.storage = storage
@@ -376,6 +378,43 @@ final class AppModel: ObservableObject {
         normalizeOpeningReviews()
     }
 
+    func updateReviewState(_ state: ReviewLibrary) { library.review = state }
+
+    /// Navigation updates memory immediately. Coalesce its writes and encode off
+    /// the main actor so moving between saved boards never waits for the archive.
+    func scheduleNavigationSave() {
+        navigationSave?.cancel()
+        let ticket = UUID(), generation = reviewGeneration
+        navigationSaveTicket = ticket
+        navigationSave = Task { [weak self] in
+            do { try await Task.sleep(for: .milliseconds(100)) } catch { return }
+            guard let self, !Task.isCancelled, self.reviewGeneration == generation,
+                  self.navigationSaveTicket == ticket else { return }
+            guard !self.library.isDemo, !self.usesEphemeralLibrary else { return }
+            guard let storage = self.storage else {
+                self.reviewSaveError = "Your review position has not been saved. Retry saving when local storage is available."
+                return
+            }
+            storage.saveInBackground(self.library) { [weak self] result in
+                Task { @MainActor in
+                    guard let self, self.reviewGeneration == generation, self.navigationSaveTicket == ticket else { return }
+                    switch result {
+                    case .success: self.reviewSaveError = nil
+                    case .failure: self.reviewSaveError = "Your review position has not been saved. Retry saving while it remains open."
+                    }
+                }
+            }
+        }
+    }
+
+    @discardableResult
+    func flushNavigationSave() -> Bool {
+        guard navigationSave != nil || reviewSaveError != nil else { return true }
+        let saved = persist()
+        reviewSaveError = saved ? nil : "Your latest review changes have not been saved. Retry saving while they remain open."
+        return saved
+    }
+
     func openingLine(for game: ChessGame) -> OpeningLine? {
         if let cached = openingLines[game.id], cached.game.hasSameMainline(as: game), cached.game.status == game.status { return cached.line }
         let line = (try? GameReplay(game: game)).map { OpeningBook.shared.line(in: $0) }
@@ -466,6 +505,7 @@ final class AppModel: ObservableObject {
 
     func loadDemo() {
         guard !isBusy else { return }
+        guard flushNavigationSave() else { return }
         reviewGeneration = UUID(); reviewJourneyCache.removeAll(); endSession()
         cancelPuzzleMatches()
         if !library.isDemo { libraryBeforeDemo = library }
@@ -729,6 +769,7 @@ final class AppModel: ObservableObject {
 
     @discardableResult
     func persist() -> Bool {
+        navigationSave?.cancel(); navigationSave = nil; navigationSaveTicket = UUID()
         guard !library.isDemo, !usesEphemeralLibrary else { return true }
         guard let storage else {
             if ProcessInfo.processInfo.arguments.contains("--ui-testing") { return true }

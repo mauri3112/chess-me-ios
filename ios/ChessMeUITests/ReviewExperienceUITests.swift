@@ -49,19 +49,93 @@ final class ReviewExperienceUITests: XCTestCase {
         tap("app.settings"); tap("settings.engines"); tap("Deep")
         app.navigationBars.buttons.firstMatch.tap(); tap("settings.done")
         openGame(); tap("review.start"); tap("game.practiceMoment")
-        app.buttons["board.square.d4"].tap(); app.buttons["board.square.e5"].tap()
+        app.buttons["board.square.d4"].tap(); app.buttons["board.square.d5"].tap()
         tap("practice.cancelCheck")
         XCTAssertTrue(app.buttons["board.square.d4"].label.contains("white pawn"))
         XCTAssertTrue(app.buttons["board.square.e5"].label.contains("black pawn"))
         XCTAssertTrue(app.staticTexts["practice.decisions"].label.hasPrefix("0 of 2"))
         XCTAssertTrue(app.buttons["practice.retryAnalysis"].exists)
         tap("practice.retryAnalysis")
-        let destination = app.descendants(matching: .any).matching(identifier: "board.square.e5").firstMatch
+        let destination = app.descendants(matching: .any).matching(identifier: "board.square.d5").firstMatch
         XCTAssertTrue(destination.label.contains("white pawn"))
         tap("practice.cancelCheck")
         tap("practice.skip")
         XCTAssertTrue(app.staticTexts["0 of 1 core positions completed."].waitForExistence(timeout: 5))
         capture("Cancelled lesson checks do not complete the exercise")
+    }
+
+    func testReviewPlaybackStaysAboveThePrimaryActionAndNavigatesWithoutAnalysis() {
+        openGame(); tap("review.start")
+        let next = app.buttons["review.line.next"]
+        XCTAssertTrue(next.waitForExistence(timeout: 5))
+        let corner = app.descendants(matching: .any).matching(identifier: "board.square.h1").firstMatch
+        XCTAssertLessThanOrEqual(corner.frame.maxY, app.buttons["game.nextMoment"].frame.minY)
+        capture("Board-first review with compact playback")
+        next.tap()
+        XCTAssertEqual(app.staticTexts["review.line.position"].label, "1/3")
+        let pawn = app.descendants(matching: .any).matching(identifier: "board.square.e5").firstMatch
+        XCTAssertTrue(pawn.label.contains("white pawn"))
+        tap("review.line.play")
+        let finished = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label == '3/3'"),
+                                                 object: app.staticTexts["review.line.position"])
+        XCTAssertEqual(XCTWaiter.wait(for: [finished], timeout: 4), .completed)
+        tap("Next plan step")
+        XCTAssertTrue(app.staticTexts["Step 2/2"].exists)
+        XCTAssertEqual(app.staticTexts["review.line.position"].label, "2/3")
+        tap("review.line.last")
+        tap("review.explore")
+        XCTAssertTrue(app.buttons["game.explore"].waitForExistence(timeout: 5))
+        tap("game.explore")
+        XCTAssertEqual(app.staticTexts["review.line.position"].label, "3/3", "Explore returns to the inspected board")
+        capture("Plan step keeps the same board and playback")
+    }
+
+    func testFreshAnalysisEnablesPlayBestMoveWithoutAnExtraInteractionAndVariationCanBeReset() {
+        openGame(); tap("game.explore")
+        let bestMove = app.buttons["game.bestMove"]
+        XCTAssertTrue(bestMove.waitForExistence(timeout: 5))
+        let ready = XCTNSPredicateExpectation(predicate: NSPredicate(format: "enabled == true"), object: bestMove)
+        XCTAssertEqual(XCTWaiter.wait(for: [ready], timeout: 40), .completed)
+        tap("game.bestMove")
+        XCTAssertTrue(app.staticTexts["game.variation"].waitForExistence(timeout: 5))
+        tap("game.previous")
+        XCTAssertFalse(app.staticTexts["game.variation"].exists)
+        tap("game.bestMove")
+        XCTAssertTrue(app.staticTexts["game.variation"].exists)
+        tap("game.options"); tap("game.resetVariation")
+        XCTAssertFalse(app.staticTexts["game.variation"].exists)
+        XCTAssertTrue(app.buttons["board.square.d4"].label.contains("white pawn"))
+        tap("game.options")
+        let replies = app.descendants(matching: .any).matching(identifier: "game.engineReplies").firstMatch
+        XCTAssertTrue(replies.waitForExistence(timeout: 3))
+        replies.tap()
+        tap("game.bestMove")
+        let replied = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label == 'Variation · 2 plies'"),
+                                                object: app.staticTexts["game.position"])
+        XCTAssertEqual(XCTWaiter.wait(for: [replied], timeout: 20), .completed)
+        capture("Interactive continuation with an automatic opponent reply")
+        tap("game.options"); tap("game.resetVariation")
+        XCTAssertFalse(app.staticTexts["game.variation"].exists)
+        XCTAssertTrue(app.buttons["board.square.d4"].label.contains("white pawn"))
+    }
+
+    func testRevealedGameLineCanBeExploredPlayedAndUndoneWithoutLosingItsResult() {
+        openGame(); tap("review.start"); tap("game.practiceMoment")
+        tap("practice.reveal")
+        XCTAssertTrue(app.staticTexts["Answer reviewed"].waitForExistence(timeout: 5))
+        capture("One-board requested solution")
+        tap("practice.exploreLine")
+        XCTAssertTrue(app.buttons["board.square.a2"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["game.position"].label.contains("3/3"))
+        app.buttons["board.square.a2"].tap(); app.buttons["board.square.b2"].tap()
+        XCTAssertTrue(app.staticTexts["game.variation"].waitForExistence(timeout: 5))
+        tap("game.previous")
+        XCTAssertTrue(app.buttons["board.square.a2"].label.contains("black rook"))
+        XCTAssertFalse(app.staticTexts["game.variation"].exists)
+        tap("game.explore")
+        XCTAssertTrue(app.staticTexts["Answer reviewed"].waitForExistence(timeout: 5))
+        tap("practice.continue")
+        XCTAssertTrue(app.staticTexts["0 of 1 core positions completed."].waitForExistence(timeout: 5))
     }
 
     func testOverviewPlanStepOptionalPracticeAndExactReturn() {
@@ -205,11 +279,23 @@ final class ReviewExperienceUITests: XCTestCase {
         app.buttons["game.open.demo-review-plan"].tap()
     }
     private func tap(_ id: String) {
+        if id == "practice.reveal" && !app.buttons[id].exists { tap("practice.options") }
         let button = app.buttons[id]
         XCTAssertTrue(button.waitForExistence(timeout: 5), app.debugDescription)
-        for _ in 0..<7 where !button.isHittable { app.swipeUp() }
-        XCTAssertTrue(button.isHittable, app.debugDescription)
-        button.tap()
+        let footerControls = ["game.previousMoment", "game.practiceMoment", "review.explore", "game.nextMoment",
+                              "practice.exploreLine", "practice.explorePuzzle", "practice.continue"]
+        func needsScroll() -> Bool {
+            if !button.isHittable { return true }
+            guard !footerControls.contains(id), id != "Next plan step" else { return false }
+            if id.hasPrefix("practice."), !app.buttons["practice.continue"].exists { return false }
+            let footer = app.buttons["practice.continue"].exists ? app.buttons["practice.continue"] : app.buttons["game.nextMoment"]
+            return footer.exists && footer.isHittable && button.frame.maxY > footer.frame.minY
+        }
+        for _ in 0..<8 {
+            if !needsScroll() { button.tap(); return }
+            app.swipeUp()
+        }
+        XCTFail("The action must be visible above the fixed footer: \(id)\n\(app.debugDescription)")
     }
     private func capture(_ title: String) {
         let attachment = XCTAttachment(screenshot: app.screenshot()); attachment.name = title

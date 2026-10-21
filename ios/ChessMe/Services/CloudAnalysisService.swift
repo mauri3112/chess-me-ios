@@ -91,7 +91,7 @@ struct CloudAnalysisJob: Decodable, Sendable {
     }
 }
 
-struct CloudReviewRecord: Codable, Identifiable {
+struct CloudReviewRecord: Codable, Identifiable, Sendable {
     let id: UUID
     let gameID: String
     let accountID: String

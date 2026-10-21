@@ -30,6 +30,7 @@ public struct AdaptiveReviewRun: Codable, Equatable, Identifiable, Sendable {
     public let goal: ReviewPracticeGoal
     public let sourceFinding: MoveFinding
     public let puzzleSnapshot: TrainingPuzzle?
+    public var puzzleConnection: ReviewPuzzleConnection?
     public var relatedOffer: ReviewPuzzleConnection?
     public var currentFEN: String
     public var acceptedMoves: [String] = []
@@ -100,6 +101,28 @@ public struct AdaptiveReviewRun: Codable, Equatable, Identifiable, Sendable {
         return result
     }
 
+    /// Reuse only the exact pinned line. Catalogue endpoints are established by
+    /// the curated solution; game endpoints still need a verified defence.
+    @discardableResult
+    public mutating func submitStoredMove(_ move: ChessMove, verifiedDepth: Int? = nil, now: Date = Date()) -> Bool {
+        guard !isFinished, pendingReply == nil, position.sideToMove == solver,
+              let root = try? ChessPosition(fen: rootFEN),
+              let proof = ReviewLineProof(position: root, moves: sourceFinding.continuation),
+              acceptedMoves.count < proof.moves.count,
+              acceptedMoves == Array(proof.moves.prefix(acceptedMoves.count)),
+              proof.positions[acceptedMoves.count].fen == currentFEN,
+              proof.moves[acceptedMoves.count] == move.uci, position.legalMoves().contains(move) else { return false }
+        let remaining = Array(proof.moves.dropFirst(acceptedMoves.count))
+        let catalogue = puzzleSnapshot.map {
+            $0.id == attempt.puzzleID && $0.positionFEN == rootFEN && $0.solution == proof.moves
+        } ?? false
+        guard catalogue || (verifiedDepth ?? 0) >= ReviewMoveAcceptance.minimumDepth else { return false }
+        let mates = (try? position.applying(move).outcome()) == .checkmate(winner: solver)
+        guard catalogue || remaining.count > 1 || mates else { return false }
+        accept(move, line: remaining, now: now, catalogueEndpoint: catalogue && remaining.count == 1)
+        return true
+    }
+
     public mutating func submit(_ move: ChessMove, evaluation: PositionEvaluation, now: Date = Date()) {
         guard !isFinished, pendingReply == nil, position.sideToMove == solver else { return }
         let board = position
@@ -112,13 +135,20 @@ public struct AdaptiveReviewRun: Codable, Equatable, Identifiable, Sendable {
             feedback = message; counterline = line
             attempt.decisions.append(ReviewDecision(positionFEN: board.fen, move: move.uci, grade: .mistake, date: now))
         case .accepted(let line):
-            attempt.decisions.append(ReviewDecision(positionFEN: board.fen, move: move.uci, grade: .accepted, date: now))
-            guard let next = try? board.applying(move) else { return }
-            currentFEN = next.fen; acceptedMoves.append(move.uci); acceptedDecisions += 1
-            attempt.line = acceptedMoves; feedback = nil; counterline = []
-            remainingLine = Array(line.dropFirst())
-            finishOrPrepareReply(now: now)
+            accept(move, line: line, now: now)
         }
+    }
+
+    private mutating func accept(_ move: ChessMove, line: [String], now: Date, catalogueEndpoint: Bool = false) {
+        let board = position
+        guard let next = try? board.applying(move) else { return }
+        attempt.decisions.append(ReviewDecision(positionFEN: board.fen, move: move.uci, grade: .accepted, date: now))
+        currentFEN = next.fen; acceptedMoves.append(move.uci); acceptedDecisions += 1
+        attempt.line = acceptedMoves; feedback = nil; counterline = []
+        remainingLine = Array(line.dropFirst())
+        if catalogueEndpoint {
+            attempt.outcome = .completed; attempt.endedAt = now; pendingReply = nil
+        } else { finishOrPrepareReply(now: now) }
     }
 
     private mutating func finishOrPrepareReply(now: Date) {
@@ -182,5 +212,24 @@ public struct AdaptiveReviewRun: Codable, Equatable, Identifiable, Sendable {
     public mutating func skip(now: Date = Date()) {
         guard !isFinished else { return }
         attempt.outcome = .skipped; attempt.endedAt = now; pendingReply = nil
+    }
+
+    /// A demonstration is browsable without becoming accepted attempt progress.
+    public func explorationGame(prefix: MoveHistory? = nil) throws -> ChessGame {
+        let root = try ChessPosition(fen: rootFEN)
+        var history = prefix ?? MoveHistory(position: root)
+        if let puzzle = puzzleSnapshot {
+            history = try MoveHistory(position: ChessPosition(fen: puzzle.setupFEN)).appending([ChessMove(uci: puzzle.setupMove)])
+        }
+        guard history.positions.last?.fen == rootFEN else { throw ChessError.invalidMove("The stored source position changed.") }
+        history = try history.appending(acceptedMoves.map(ChessMove.init(uci:)))
+        if attempt.outcome == .revealed {
+            let requested = acceptedMoves.isEmpty ? sourceFinding.continuation : remainingLine
+            history = try history.appending(requested.map(ChessMove.init(uci:)))
+        }
+        return ChessGame(id: "pgn-practice-" + id, username: "Practice", white: "Practice continuation",
+                         black: puzzleSnapshot.map { "Lichess puzzle " + $0.id } ?? sourceFinding.gameLabel,
+                         playedAt: attempt.startedAt, playerSide: solver, moves: history.moves.map(\.uci).joined(separator: " "),
+                         initialFEN: history.positions[0].fen, status: "resign")
     }
 }

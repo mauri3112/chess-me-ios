@@ -3,6 +3,39 @@ import ChessMeCore
 @testable import ChessMe
 
 final class ReviewExperienceTests: XCTestCase {
+    @MainActor func testRelatedConnectionSurvivesResumeAndCompletionWithoutBeingShownAsAnAttemptCue() throws {
+        let root = "7k/5ppp/8/8/8/8/8/R5K1 w - - 1 2"
+        let game = ChessGame(id: "connection-game", username: "Learner", white: "Learner", black: "Partner",
+                             playedAt: Date(), playerSide: .white, moves: "a1a2", initialFEN: root, status: "resign")
+        let finding = MoveFinding(id: "backrank", gameID: game.id, gameLabel: "Learner vs Partner", positionFEN: root,
+                                  playedMove: "a1a2", bestMove: "a1a8", acceptedMoves: ["a1a8"], continuation: ["a1a8"],
+                                  centipawnLoss: 500, theme: "Missed checkmate", explanation: "Inspect the back rank.",
+                                  hint: "Consider checks.", moveNumber: 2, source: "device", isPuzzle: true, quality: .blunder)
+        let analysis = GameAnalysis(gameID: game.id, findings: [finding], analyzedPlies: 1, totalPlies: 1)
+        let puzzle = TrainingPuzzle(id: "connection-puzzle", setupFEN: "6k1/5ppp/8/8/8/8/8/4R1K1 b - - 0 1",
+                                    setupMove: "g8h8", positionFEN: "7k/5ppp/8/8/8/8/8/4R1K1 w - - 1 2",
+                                    solution: ["e1e8"], rating: 1200, themes: ["backRankMate"],
+                                    url: URL(string: "https://lichess.org/training/connection-puzzle")!)
+        let model = AppModel(previewLibrary: LibrarySnapshot(games: [game], analyses: [analysis], isDemo: true))
+        let journey = model.reviewJourney(for: game)
+        let moment = try XCTUnwrap(journey.moments.first)
+        model.encountered(moment, game: game, journey: journey, lineShown: true)
+        let original = try model.prepareReviewRun(finding: puzzle.reviewFinding, puzzle: puzzle, linkedTargetID: moment.id)
+        let explanation = try XCTUnwrap(model.puzzleConnectionExplanation(for: original))
+        XCTAssertFalse(explanation.isEmpty)
+        let restored = AppModel(previewLibrary: try JSONDecoder().decode(LibrarySnapshot.self, from: JSONEncoder().encode(model.library)))
+        var resumed = try restored.prepareReviewRun(finding: puzzle.reviewFinding, puzzle: puzzle,
+                                                   linkedTargetID: moment.id, resumeRunID: original.id)
+        XCTAssertEqual(resumed.id, original.id)
+        XCTAssertTrue(resumed.submitStoredMove(try ChessMove(uci: "e1e8")))
+        XCTAssertTrue(resumed.isFinished)
+        XCTAssertEqual(restored.puzzleConnectionExplanation(for: resumed), explanation)
+        resumed.puzzleConnection = nil // Migration of an older saved run.
+        XCTAssertEqual(restored.puzzleConnectionExplanation(for: resumed), explanation)
+        restored.changeReview { $0.targets[0].invalidated = true }
+        XCTAssertNil(restored.puzzleConnectionExplanation(for: resumed))
+    }
+
     @MainActor private func fixture() throws -> (AppModel, ChessGame, MoveFinding) {
         let game = try XCTUnwrap(DemoContent.games().first)
         let review = try LocalAnalyzer(options: AnalysisOptions(maximumDepth: 1, nodesPerMove: 800)).analyze(game: game)

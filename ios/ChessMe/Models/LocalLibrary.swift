@@ -1,7 +1,7 @@
 import Foundation
 import ChessMeCore
 
-struct PracticeRecord: Codable, Identifiable {
+struct PracticeRecord: Codable, Identifiable, Sendable {
     var id: String { findingID }
     let findingID: String
     var correctCount: Int
@@ -12,14 +12,14 @@ struct PracticeRecord: Codable, Identifiable {
     var lastPracticedAt: Date
 }
 
-struct CloudBatchRecord: Codable {
+struct CloudBatchRecord: Codable, Sendable {
     let accountID: String
     let gameIDs: [String]
     var submittedGameIDs: [String]
     let startedAt: Date
 }
 
-struct LibrarySnapshot: Codable {
+struct LibrarySnapshot: Codable, Sendable {
     var games: [ChessGame] = []
     var analyses: [GameAnalysis] = []
     var practice: [PracticeRecord] = []
@@ -45,8 +45,10 @@ struct LibrarySnapshot: Codable {
     var review: ReviewLibrary?
 }
 
-final class LocalLibrary {
+final class LocalLibrary: @unchecked Sendable {
     private let url: URL
+    // All file access uses one writer, including explicit saves and deletion.
+    private let writer = DispatchQueue(label: "com.chessme.library-writer", qos: .utility)
 
     init(url: URL? = nil) throws {
         if let url { self.url = url; return }
@@ -57,6 +59,10 @@ final class LocalLibrary {
     }
 
     func load() throws -> LibrarySnapshot {
+        try writer.sync { try read() }
+    }
+
+    private func read() throws -> LibrarySnapshot {
         guard FileManager.default.fileExists(atPath: url.path) else { return LibrarySnapshot() }
         let snapshot = try JSONDecoder().decode(LibrarySnapshot.self, from: Data(contentsOf: url))
         // Saved analysis must remain readable for charging tasks after the first
@@ -66,11 +72,24 @@ final class LocalLibrary {
     }
 
     func save(_ snapshot: LibrarySnapshot) throws {
+        try writer.sync { try write(snapshot) }
+    }
+
+    func saveInBackground(_ snapshot: LibrarySnapshot, completion: @escaping @Sendable (Result<Void, Error>) -> Void) {
+        writer.async {
+            do { try self.write(snapshot); completion(.success(())) }
+            catch { completion(.failure(error)) }
+        }
+    }
+
+    private func write(_ snapshot: LibrarySnapshot) throws {
         let data = try JSONEncoder().encode(snapshot)
         try data.write(to: url, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
     }
 
     func delete() throws {
-        if FileManager.default.fileExists(atPath: url.path) { try FileManager.default.removeItem(at: url) }
+        try writer.sync {
+            if FileManager.default.fileExists(atPath: url.path) { try FileManager.default.removeItem(at: url) }
+        }
     }
 }

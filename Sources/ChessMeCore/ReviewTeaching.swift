@@ -137,6 +137,7 @@ public struct ReviewMoment: Identifiable, Sendable {
     public let ideaKey: String?
     public let keyLine: [String]
     public let explanation: String
+    public var lineProof: ReviewLineProof? = nil
     public var title: String { finding.theme }
     /// Lesson identity changes with its playable objective, independently of
     /// unrelated decisions or completion timestamps elsewhere in the game.
@@ -148,6 +149,7 @@ public struct ReviewMoment: Identifiable, Sendable {
 
 public struct ReviewJourney: Sendable {
     public let gameID: String
+    public let history: MoveHistory?
     public let revision: String
     public let moments: [ReviewMoment]
     public let mainTakeawayID: String?
@@ -156,8 +158,9 @@ public struct ReviewJourney: Sendable {
     public init(game: ChessGame, analysis: GameAnalysis?) {
         self.gameID = game.id
         guard let analysis, let replay = try? GameReplay(game: game) else {
-            revision = "unavailable"; moments = []; mainTakeawayID = nil; coverage = "Analysis unavailable"; return
+            history = nil; revision = "unavailable"; moments = []; mainTakeawayID = nil; coverage = "Analysis unavailable"; return
         }
+        history = replay.moveHistory
         let encoder = JSONEncoder(); encoder.outputFormatting = .sortedKeys
         let evidence = (try? encoder.encode(analysis)).map { String(decoding: $0, as: UTF8.self) } ?? ""
         revision = ReviewIdentity.make([game.id, game.moves, game.initialFEN ?? "", evidence])
@@ -174,7 +177,7 @@ public struct ReviewJourney: Sendable {
             let text = idea?.explanation ?? original.explanation
             let finding = Self.finding(original, explanation: text, continuation: proof?.moves ?? [])
             items.append(ReviewMoment(id: finding.id, finding: finding, kind: .improvement, plies: [ply],
-                                      ideaKey: idea?.key, keyLine: proof?.moves ?? [], explanation: text))
+                                      ideaKey: idea?.key, keyLine: proof?.moves ?? [], explanation: text, lineProof: proof))
         }
 
         // Positive moments need both a concrete board mechanism and completed
@@ -206,7 +209,7 @@ public struct ReviewJourney: Sendable {
                                       moveNumber: replay.positions[ply].fullmoveNumber, source: analysis.source,
                                       isPuzzle: true, quality: assessment.quality)
             items.append(ReviewMoment(id: id, finding: finding, kind: .strength, plies: [ply],
-                                      ideaKey: idea.key, keyLine: tokens, explanation: idea.explanation))
+                                      ideaKey: idea.key, keyLine: tokens, explanation: idea.explanation, lineProof: line))
         }
         let plans = Self.filePlans(game: game, replay: replay, assessments: assessments, source: analysis.source)
         let planRoots = Set(plans.compactMap { $0.plies.first })
@@ -270,7 +273,7 @@ public struct ReviewJourney: Sendable {
                                       moveNumber: root.fullmoveNumber, source: source, isPuzzle: good && firstGrade.playedMove == firstGrade.bestMove,
                                       quality: own.compactMap { assessments[$0] }.max(by: { $0.centipawnLoss < $1.centipawnLoss })?.quality ?? firstGrade.quality)
             plans.append(ReviewMoment(id: id, finding: finding, kind: .plan, plies: own,
-                                      ideaKey: "open-file", keyLine: tokens, explanation: explanation))
+                                      ideaKey: "open-file", keyLine: tokens, explanation: explanation, lineProof: proof))
         }
         return plans
     }

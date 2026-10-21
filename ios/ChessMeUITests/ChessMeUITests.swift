@@ -141,7 +141,7 @@ final class ChessMeUITests: XCTestCase {
         e2.tap()
         XCTAssertEqual(e2.value as? String, "Selected")
         e2.tap()
-        XCTAssertEqual(e2.value as? String, "")
+        XCTAssertNotEqual(e2.value as? String, "Selected", "Deselecting preserves any current engine highlight")
         e2.tap()
         app.buttons["board.square.e4"].tap()
         XCTAssertTrue(app.staticTexts["game.variation"].waitForExistence(timeout: 5))
@@ -308,6 +308,7 @@ final class ChessMeUITests: XCTestCase {
         app.buttons["puzzle.open.00sHx"].tap()
         XCTAssertTrue(app.descendants(matching: .any)["practice.board"].waitForExistence(timeout: 10))
         XCTAssertFalse(app.descendants(matching: .any)["analysis.evaluation"].exists)
+        app.buttons["practice.options"].tap()
         let reveal = app.buttons["practice.reveal"]
         for _ in 0..<5 where !reveal.isHittable { app.swipeUp() }
         reveal.tap()

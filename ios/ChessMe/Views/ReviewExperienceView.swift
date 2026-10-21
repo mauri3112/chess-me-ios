@@ -10,31 +10,55 @@ struct ReviewLineView: View {
     let fen: String
     let moves: [String]
     var perspective: Side = .white
-    var label = "Review key line"
-    @State private var cursor = 0
+    var label = ""
+    var cachedProof: ReviewLineProof? = nil
+    var initialCursor = 0
+    @StateObject private var playback = ReviewLinePlayback()
+    @Environment(\.chessReduceMotion) private var reduceMotion
+    @Environment(\.scenePhase) private var scenePhase
     private var proof: ReviewLineProof? {
-        (try? ChessPosition(fen: fen)).flatMap { ReviewLineProof(position: $0, moves: moves) }
+        guard let proof = playback.proof, proof.rootFEN == fen, proof.moves == moves else { return nil }
+        return proof
     }
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text(label).font(.caption.weight(.semibold)).foregroundStyle(ChessMeStyle.muted)
-            if let proof {
-                let index = min(cursor, proof.moves.count)
-                ChessBoardView(position: proof.positions[index], perspective: perspective)
-                Text(proof.notation.joined(separator: " ")).font(.subheadline.monospaced())
-                    .accessibilityIdentifier("review.keyLine")
-                HStack {
-                    Button("Previous position") { cursor = max(0, index - 1) }.disabled(index == 0)
-                    Spacer()
-                    Text("\(index)/\(proof.moves.count)").font(.caption.monospacedDigit())
-                    Spacer()
-                    Button("Next position") { cursor = min(proof.moves.count, index + 1) }.disabled(index == proof.moves.count)
-                }.font(.caption).frame(minHeight: 44)
-            } else if let board = try? ChessPosition(fen: fen) {
-                ChessBoardView(position: board, perspective: perspective)
-                Text("A supporting line is not available for this position.").font(.caption)
+            if !label.isEmpty { Text(label).font(.caption).foregroundStyle(ChessMeStyle.muted) }
+            if let root = try? ChessPosition(fen: fen) {
+                let index = min(playback.cursor, proof?.moves.count ?? 0)
+                let previous = index > 0 ? proof.flatMap { try? ChessMove(uci: $0.moves[index - 1]) } : nil
+                ChessBoardView(position: proof?.positions[index] ?? root, perspective: perspective,
+                               highlightedSquares: previous.map { [$0.from, $0.to] } ?? [])
+                    .accessibilityIdentifier("review.line.board")
+                HStack(spacing: 6) {
+                    BoardIconButton(title: "Restart line", symbol: "backward.end.fill") { playback.seek(0) }
+                        .disabled(index == 0).accessibilityIdentifier("review.line.first")
+                    BoardIconButton(title: "Previous position", symbol: "chevron.left") { playback.seek(index - 1) }
+                        .disabled(index == 0).accessibilityIdentifier("review.line.previous")
+                    Spacer(minLength: 0)
+                    BoardIconButton(title: playback.isPlaying ? "Pause line" : "Play line",
+                                    symbol: playback.isPlaying ? "pause.fill" : "play.fill") { playback.play(reduceMotion: reduceMotion) }
+                        .disabled(proof == nil).accessibilityIdentifier("review.line.play")
+                    Spacer(minLength: 0)
+                    BoardIconButton(title: "Next position", symbol: "chevron.right") { playback.seek(index + 1) }
+                        .disabled(index >= (proof?.moves.count ?? 0)).accessibilityIdentifier("review.line.next")
+                    BoardIconButton(title: "Last position", symbol: "forward.end.fill") { playback.seek(proof?.moves.count ?? 0) }
+                        .disabled(index >= (proof?.moves.count ?? 0)).accessibilityIdentifier("review.line.last")
+                }
+                if let proof {
+                    HStack {
+                        Text(proof.notation.joined(separator: " ")).font(.caption.monospaced()).lineLimit(1)
+                            .accessibilityIdentifier("review.keyLine")
+                        Spacer()
+                        Text("\(index)/\(proof.moves.count)").font(.caption.monospacedDigit())
+                            .accessibilityIdentifier("review.line.position")
+                    }.foregroundStyle(ChessMeStyle.muted)
+                }
             }
-        }.onChange(of: fen + moves.joined()) { _, _ in cursor = 0 }
+        }
+        .task(id: fen + moves.joined()) { await playback.load(fen: fen, moves: moves, cached: cachedProof, at: initialCursor) }
+        .onChange(of: initialCursor) { _, index in playback.seek(index) }
+        .onChange(of: scenePhase) { _, phase in if phase != .active { playback.stop() } }
+        .onDisappear { playback.stop() }
     }
 }
 
@@ -65,6 +89,7 @@ struct GameDetailView: View {
     @State private var savedResume: ReviewBookmark?
     @State private var updateNotice: String?
     @State private var practice: ReviewPracticeEntry?
+    @State private var showingDetails = false
     private var analysis: GameAnalysis? { model.gameAnalysis(for: game.id) }
     private var moment: ReviewMoment? { journey?.moments.first { $0.id == momentID } }
     private var momentIndex: Int { journey?.moments.firstIndex { $0.id == momentID } ?? 0 }
@@ -72,10 +97,12 @@ struct GameDetailView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
-                GamePlayerNames(game: game, outcome: model.outcome(for: game), prominent: true)
-                    .accessibilityIdentifier("game.match")
-                if model.isDemo { Eyebrow(text: "Sample game") }
-                status
+                if place != .moment {
+                    GamePlayerNames(game: game, outcome: model.outcome(for: game), prominent: true)
+                        .accessibilityIdentifier("game.match")
+                    if model.isDemo { Eyebrow(text: "Sample game") }
+                    status
+                }
                 if let updateNotice { Text(updateNotice).font(.caption).foregroundStyle(ChessMeStyle.muted) }
                 switch place {
                 case .overview: overview
@@ -91,7 +118,15 @@ struct GameDetailView: View {
         .navigationTitle("Game review").navigationBarTitleDisplayMode(.inline).toolbar(.visible, for: .navigationBar)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
-                FavoriteButton(selected: model.isFavorite(game)) { model.toggleFavorite(game) }
+                Menu {
+                    Button("Overview", systemImage: "square.grid.2x2", action: showOverview)
+                    if let moment, moment.finding.isPuzzle {
+                        Button("Keep for practice", systemImage: "bookmark") { model.updateTarget(moment.id, action: .keep) }
+                    }
+                    Button("Review details", systemImage: "info.circle") { showingDetails = true }
+                    Button(model.isFavorite(game) ? "Remove from saved games" : "Save game", systemImage: "heart") { model.toggleFavorite(game) }
+                } label: { Image(systemName: "ellipsis.circle").frame(width: 44, height: 44) }
+                    .accessibilityLabel("Review options").accessibilityIdentifier("review.options")
             }
         }
         .task {
@@ -117,6 +152,50 @@ struct GameDetailView: View {
         }
         .onChange(of: model.reviewGeneration) { _, _ in
             journey = nil; practice = nil; dismiss()
+        }
+        .safeAreaInset(edge: .bottom) {
+            if place == .moment {
+                HStack(spacing: 12) {
+                    BoardIconButton(title: step > 0 ? "Previous plan step" : "Previous moment", symbol: "chevron.left") {
+                        if step > 0 { step -= 1; bookmark() }
+                        else if let items = journey?.moments, momentIndex > 0 { open(items[momentIndex - 1].id) }
+                    }.disabled(momentIndex == 0 && step == 0).accessibilityIdentifier("game.previousMoment")
+                    if let moment {
+                        if moment.finding.isPuzzle {
+                            BoardIconButton(title: "Practise", symbol: "scope") {
+                                practice = ReviewPracticeEntry(findings: [moment.finding])
+                            }.accessibilityIdentifier("game.practiceMoment")
+                        }
+                        NavigationLink {
+                            GameReplayExplorer(game: game, initialPly: moment.plies[min(step, moment.plies.count - 1)])
+                        } label: {
+                            Image(systemName: "arrow.triangle.branch").font(.system(size: 17, weight: .semibold))
+                                .frame(width: 44, height: 44)
+                                .background(ChessMeStyle.green.opacity(0.07), in: RoundedRectangle(cornerRadius: 12))
+                        }.accessibilityLabel("Explore").accessibilityIdentifier("review.explore")
+                    }
+                    let hasNextStep = moment.map { $0.kind == .plan && step + 1 < $0.plies.count } ?? false
+                    PrimaryButton(title: hasNextStep ? "Next step" : momentIndex + 1 < (journey?.moments.count ?? 0) ? "Next moment" : "Review recap") {
+                        if hasNextStep { step += 1; bookmark(); return }
+                        guard let items = journey?.moments else { return }
+                        if momentIndex + 1 < items.count { open(items[momentIndex + 1].id) }
+                        else { place = .recap; bookmark() }
+                    }.accessibilityLabel(hasNextStep ? "Next plan step" : momentIndex + 1 < (journey?.moments.count ?? 0) ? "Next moment" : "Review recap")
+                        .accessibilityIdentifier("game.nextMoment")
+                }.padding(.horizontal, 22).padding(.vertical, 10).background(ChessMeStyle.paper)
+            }
+        }
+        .sheet(isPresented: $showingDetails) {
+            NavigationStack {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 18) {
+                        GamePlayerNames(game: game, outcome: model.outcome(for: game), prominent: true)
+                        status
+                        if let moment { Text(moment.title).font(ChessMeStyle.title(23)); Text(moment.explanation) }
+                    }.padding(22)
+                }.background(ChessMeStyle.paper).navigationTitle("Review details")
+                    .toolbar { Button("Done") { showingDetails = false } }
+            }
         }
         .sheet(item: $practice) { entry in
             NavigationStack {
@@ -194,58 +273,23 @@ struct GameDetailView: View {
     }
 
     private func momentView(_ item: ReviewMoment) -> some View {
-        VStack(alignment: .leading, spacing: 16) {
+        VStack(alignment: .leading, spacing: 12) {
             HStack {
-                Text("Moment \(momentIndex + 1) of \(journey?.moments.count ?? 0)").font(.caption)
+                Text("Moment \(momentIndex + 1)/\(journey?.moments.count ?? 0) · Move \(item.finding.moveNumber)")
+                    .font(.caption.weight(.semibold)).foregroundStyle(ChessMeStyle.muted)
                 Spacer()
-                Button("Overview", action: showOverview)
+                Text(model.isDemo ? "Sample" : analysis?.source == "cloud" ? "Cloud review" : "Device review")
+                    .font(.caption).foregroundStyle(ChessMeStyle.muted)
             }
-            Text(item.title).font(ChessMeStyle.title(26))
-            Text(item.explanation).font(.subheadline).lineSpacing(3).accessibilityIdentifier("review.idea")
+            Text(item.title).font(ChessMeStyle.title(22)).fixedSize(horizontal: false, vertical: true)
             if item.kind == .plan, item.plies.count > 1 {
-                HStack {
-                    Button("Previous plan step") { step = max(0, step - 1); bookmark() }.disabled(step == 0)
-                    Spacer()
-                    Text("Step \(step + 1)/\(item.plies.count)").font(.caption)
-                    Spacer()
-                    Button("Next plan step") { step = min(item.plies.count - 1, step + 1); bookmark() }
-                        .disabled(step + 1 >= item.plies.count)
-                }.font(.caption).frame(minHeight: 44).accessibilityIdentifier("review.planSteps")
+                Text("Step \(step + 1)/\(item.plies.count)").font(.caption.weight(.medium))
+                    .accessibilityIdentifier("review.planSteps")
             }
             let offset = item.kind == .plan ? (item.plies[min(step, item.plies.count - 1)] - item.plies[0]) : 0
-            let proof = (try? ChessPosition(fen: item.finding.positionFEN))
-                .flatMap { ReviewLineProof(position: $0, moves: item.keyLine) }
-            let start = proof?.positions[min(offset, proof?.moves.count ?? 0)].fen ?? item.finding.positionFEN
-            ReviewLineView(fen: start, moves: Array(item.keyLine.dropFirst(offset)), perspective: game.playerSide,
-                           label: item.kind == .plan ? "Played plan sequence" : "Illustrative review line")
-                .id(item.id + String(step))
-            NavigationLink {
-                GameReplayExplorer(game: game, initialPly: item.plies[min(step, item.plies.count - 1)])
-            } label: { Label("Explore alternatives", systemImage: "arrow.triangle.branch") }
-                .accessibilityIdentifier("review.explore")
-            if item.finding.isPuzzle {
-                Button(item.kind == .plan ? "Practice the plan's key decision" : "Practice this moment") {
-                    practice = ReviewPracticeEntry(findings: [item.finding])
-                }.font(.subheadline.weight(.semibold)).frame(minHeight: 44).accessibilityIdentifier("game.practiceMoment")
-                if item.kind == .plan && step > 0 {
-                    Text("Practice starts at move \(item.finding.moveNumber) and returns to this plan step.").font(.caption)
-                }
-                Button("Keep for practice") { model.updateTarget(item.id, action: .keep) }.frame(minHeight: 44)
-            } else {
-                Text("This moment is available to review and explore; its exercise cannot yet be graded reliably.").font(.caption)
-            }
-            HStack {
-                Button("Previous moment") {
-                    guard let items = journey?.moments, momentIndex > 0 else { return }; open(items[momentIndex - 1].id)
-                }.disabled(momentIndex == 0).accessibilityIdentifier("game.previousMoment")
-                Spacer()
-                Button(momentIndex + 1 < (journey?.moments.count ?? 0) ? "Next moment" : "Review recap") {
-                    guard let items = journey?.moments else { return }
-                    if momentIndex + 1 < items.count { open(items[momentIndex + 1].id) }
-                    else { place = .recap; bookmark() }
-                }.accessibilityIdentifier("game.nextMoment")
-            }.frame(minHeight: 44)
-            Button("Finish for now") { place = .recap; bookmark() }.frame(minHeight: 44)
+            ReviewLineView(fen: item.finding.positionFEN, moves: item.keyLine, perspective: game.playerSide,
+                           cachedProof: item.lineProof, initialCursor: offset)
+            Text(item.explanation).font(.subheadline).lineSpacing(2).lineLimit(3).accessibilityIdentifier("review.idea")
         }
     }
 

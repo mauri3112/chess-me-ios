@@ -5,10 +5,11 @@ extension AppModel {
     var reviewState: ReviewLibrary { library.review ?? ReviewLibrary() }
 
     @discardableResult
-    func changeReview(_ change: (inout ReviewLibrary) -> Void) -> Bool {
+    func changeReview(deferSave: Bool = false, _ change: (inout ReviewLibrary) -> Void) -> Bool {
         var state = reviewState
         change(&state)
-        updateLibrary { $0.review = state }
+        updateReviewState(state)
+        if deferSave { scheduleNavigationSave(); return true }
         let saved = persist()
         reviewSaveError = saved ? nil : "Your latest practice or line changes have not been saved. Retry while they remain open."
         return saved
@@ -16,18 +17,18 @@ extension AppModel {
 
     func reviewJourney(for game: ChessGame) -> ReviewJourney {
         let analysis = gameAnalysis(for: game.id)
-        let key = game.id + "|" + (analysis.map(Self.analysisSignature) ?? "none") + "|" + game.moves
-        if let cached = reviewJourneyCache[key] { return cached }
+        if let cached = reviewJourneyCache[game.id], cached.game == game, cached.analysis == analysis { return cached.journey }
         let journey = ReviewJourney(game: game, analysis: analysis)
         // Bound view caching; durable state is in the local library.
-        if reviewJourneyCache.count > 30 { reviewJourneyCache.removeAll() }
-        reviewJourneyCache[key] = journey
+        if reviewJourneyCache.count >= 30, let oldest = reviewJourneyCache.keys.first { reviewJourneyCache.removeValue(forKey: oldest) }
+        reviewJourneyCache[game.id] = (game, analysis, journey)
         return journey
     }
 
     func saveBookmark(_ bookmark: ReviewBookmark) {
         guard library.games.contains(where: { $0.id == bookmark.gameID }) else { return }
-        changeReview {
+        if reviewState.bookmarks.first(where: { $0.gameID == bookmark.gameID }) == bookmark { return }
+        changeReview(deferSave: true) {
             $0.bookmarks.removeAll { $0.gameID == bookmark.gameID }
             $0.bookmarks.append(bookmark)
         }
@@ -37,10 +38,8 @@ extension AppModel {
         guard library.games.contains(where: { $0.id == game.id && $0.username == game.username && $0.hasSameMainline(as: game) }),
               journey.gameID == game.id, journey.moments.contains(where: { $0.id == moment.id }),
               reviewJourney(for: game).moments.first(where: { $0.id == moment.id })?.evidenceRevision == moment.evidenceRevision else { return }
-        let history = (try? GameReplay(game: game)).map { replay in
-            Array(replay.positions.prefix(moment.plies.first ?? 0)).map(\.repetitionKey)
-        } ?? []
-        changeReview { state in
+        let history = journey.history.map { Array($0.positions.prefix(moment.plies.first ?? 0)).map(\.repetitionKey) } ?? []
+        changeReview(deferSave: true) { state in
             if moment.finding.isPuzzle {
                 state.enroll(ReviewLearningTarget(username: game.username, finding: moment.finding, revision: moment.evidenceRevision,
                                                  history: history, ideaKey: moment.ideaKey))
@@ -55,7 +54,7 @@ extension AppModel {
               let analysis = gameAnalysis(for: game.id), reviewJourney(for: game).revision == journey.revision else { return }
         let ids = Set(journey.moments.map(\.id))
         let observations = ReviewGameConnections.observations(game: game, journey: journey, targets: reviewState.targets)
-        changeReview { state in
+        changeReview(deferSave: true) { state in
             for index in state.targets.indices where state.targets[index].finding.gameID == game.id {
                 let target = state.targets[index]
                 if let current = journey.moments.first(where: { $0.id == target.id }) {
@@ -99,6 +98,55 @@ extension AppModel {
         guard let moment = journey.moments.first(where: { $0.id == finding.id }) else { return nil }
         encountered(moment, game: game, journey: journey, lineShown: false)
         return reviewState.targets.first { $0.id == finding.id }
+    }
+
+    func storedDecisionDepth(for run: AdaptiveReviewRun, move: ChessMove) -> Int? {
+        guard let target = reviewState.targets.first(where: { $0.id == run.targetID }),
+              !target.invalidated, target.revision == run.revision,
+              let game = library.games.first(where: { $0.id == run.sourceFinding.gameID }),
+              let history = reviewJourney(for: game).history,
+              let root = history.positions.firstIndex(where: { $0.fen == run.rootFEN }),
+              Array(history.positions.prefix(root)).map(\.repetitionKey) == run.rootHistory,
+              root + run.acceptedMoves.count < history.positions.count,
+              history.positions[root + run.acceptedMoves.count].fen == run.currentFEN,
+              Array(history.moves.dropFirst(root).prefix(run.acceptedMoves.count)).map(\.uci) == run.acceptedMoves,
+              let grade = gameAnalysis(for: game.id)?.moveAssessments?.first(where: {
+                  $0.ply == root + run.acceptedMoves.count && $0.positionFEN == run.currentFEN && $0.bestMove == move.uci
+              }), grade.completedDepth >= ReviewMoveAcceptance.minimumDepth else { return nil }
+        return grade.completedDepth
+    }
+
+    func practiceLeadIn(for run: AdaptiveReviewRun) -> MoveHistory? {
+        guard run.acceptedMoves.isEmpty, !run.isFinished else { return nil }
+        if let puzzle = run.puzzleSnapshot, let start = try? ChessPosition(fen: puzzle.setupFEN),
+           let move = try? ChessMove(uci: puzzle.setupMove) {
+            return try? MoveHistory(position: start).appending([move])
+        }
+        guard let game = library.games.first(where: { $0.id == run.sourceFinding.gameID }),
+              let history = reviewJourney(for: game).history,
+              let index = history.positions.firstIndex(where: { $0.fen == run.rootFEN }) else { return nil }
+        let lead = history.prefix(through: index).leadIn()
+        return lead.moves.isEmpty ? nil : lead
+    }
+
+    func practiceExploration(for run: AdaptiveReviewRun) throws -> ChessGame {
+        let history = library.games.first(where: { $0.id == run.sourceFinding.gameID }).flatMap { reviewJourney(for: $0).history }
+        let index = history?.positions.firstIndex { $0.fen == run.rootFEN }
+        return try run.explorationGame(prefix: index.flatMap { history?.prefix(through: $0) })
+    }
+
+    func puzzleConnectionExplanation(for run: AdaptiveReviewRun) -> String? {
+        if let connection = run.puzzleConnection, connection.targetID == run.targetID,
+           connection.puzzle == run.puzzleSnapshot { return connection.explanation }
+        // Older runs did not pin the connection. Recover one only from the
+        // same still-supported lesson revision and the exact puzzle snapshot.
+        guard let puzzle = run.puzzleSnapshot,
+              let target = reviewState.targets.first(where: { $0.id == run.targetID }), !target.invalidated,
+              target.revision == run.attempt.linkedLessonRevision,
+              let game = library.games.first(where: { $0.id == target.finding.gameID }),
+              let moment = reviewJourney(for: game).moments.first(where: { $0.id == target.id }),
+              moment.evidenceRevision == target.revision else { return nil }
+        return ReviewPuzzleConnection.match(puzzle: puzzle, moment: moment)?.explanation
     }
 
     func prepareReviewRun(finding: MoveFinding, puzzle: TrainingPuzzle? = nil, linkedTargetID: String? = nil,
@@ -151,6 +199,11 @@ extension AppModel {
         let parent = parentRunID.flatMap { id in reviewState.runs.first { $0.id == id } }
         run.attempt.sourceGameID = sourceFinding?.gameID ?? returnGameID ?? parent?.attempt.sourceGameID
         run.attempt.sourceUsername = target?.username ?? library.games.first { $0.id == run.attempt.sourceGameID }?.username ?? parent?.attempt.sourceUsername
+        if let puzzle, let game = library.games.first(where: { $0.id == run.attempt.sourceGameID }),
+           let moment = reviewJourney(for: game).moments.first(where: { $0.id == targetID }),
+           target == nil || target?.revision == moment.evidenceRevision {
+            run.puzzleConnection = ReviewPuzzleConnection.match(puzzle: puzzle, moment: moment)
+        }
         changeReview {
             $0.runs.append(run); $0.record(run.attempt)
             if $0.session?.id == sessionID && $0.session?.targetIDs.contains(targetID) == true { $0.session?.attemptIDs.append(run.id) }

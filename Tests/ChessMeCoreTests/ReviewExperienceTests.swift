@@ -103,6 +103,66 @@ struct ReviewExperienceTests {
         }
     }
 
+    @Test func pinnedNonMatingPuzzleAcceptsItsWholeLineWithoutFreshAnalysis() throws {
+        let setup = try ChessPosition(fen: "6k1/7p/2p5/3q4/8/5Q2/8/RR1R2K1 b - - 0 1")
+        let root = try setup.applying(ChessMove(uci: "h7h6"))
+        let puzzle = TrainingPuzzle(id: "stored-exchange", setupFEN: setup.fen, setupMove: "h7h6", positionFEN: root.fen,
+                                    solution: ["d1d5", "c6d5", "f3d5"], rating: 1600, themes: ["advantage"],
+                                    url: URL(string: "https://lichess.org/training/stored-exchange")!)
+        var run = try AdaptiveReviewRun(finding: puzzle.reviewFinding, revision: "pinned", kind: .relatedPuzzle,
+                                        puzzleID: puzzle.id, puzzle: puzzle)
+        #expect(!run.requiresMate && run.requiredDecisions == 2)
+        let storedDecision1 = !run.submitStoredMove(try ChessMove(uci: "a1a2"))
+        #expect(storedDecision1)
+        #expect(run.acceptedMoves.isEmpty)
+        let storedDecision2 = run.submitStoredMove(try ChessMove(uci: "d1d5"))
+        #expect(storedDecision2)
+        #expect(run.pendingReply == "c6d5" && !run.isFinished)
+        run.playReply()
+        run = try JSONDecoder().decode(AdaptiveReviewRun.self, from: JSONEncoder().encode(run))
+        let storedDecision3 = run.submitStoredMove(try ChessMove(uci: "f3d5"))
+        #expect(storedDecision3)
+        #expect(run.attempt.outcome == .completed && run.attempt.cleanCompletion)
+        #expect(run.acceptedMoves == puzzle.solution && run.pendingReply == nil)
+    }
+
+    @Test func storedGameAnswersRequireMatchingDepthAndADefenceAtTheEndpoint() throws {
+        let (_, _, journey) = try plan()
+        let item = try #require(journey.moments.first { $0.kind == .plan })
+        var run = try AdaptiveReviewRun(finding: item.finding, revision: "pinned")
+        let move = try ChessMove(uci: "d4e5")
+        let storedDecision4 = !run.submitStoredMove(move)
+        #expect(storedDecision4)
+        let storedDecision5 = !run.submitStoredMove(move, verifiedDepth: 5)
+        #expect(storedDecision5)
+        let storedDecision6 = run.submitStoredMove(move, verifiedDepth: 12)
+        #expect(storedDecision6)
+        run.playReply()
+        let storedDecision7 = !run.submitStoredMove(try ChessMove(uci: "a1d1"), verifiedDepth: 12)
+        #expect(storedDecision7)
+        #expect(run.acceptedDecisions == 1 && !run.isFinished)
+    }
+
+    @Test func revealedAndAcceptedContinuationsStaySeparateFromAttemptCreditInExplore() throws {
+        let puzzle = LearningTests.puzzle
+        var run = try AdaptiveReviewRun(finding: puzzle.reviewFinding, revision: "pinned", kind: .relatedPuzzle,
+                                        puzzleID: puzzle.id, puzzle: puzzle)
+        let storedDecision8 = run.submitStoredMove(try ChessMove(uci: puzzle.solution[0]))
+        #expect(storedDecision8)
+        run.playReply()
+        let prefix = run.acceptedMoves
+        run.reviewAnswer()
+        let replay = try GameReplay(game: run.explorationGame())
+        #expect(replay.moves.map(\.uci) == [puzzle.setupMove] + puzzle.solution)
+        #expect(run.acceptedMoves == prefix && run.attempt.outcome == .revealed)
+        let (_, _, journey) = try plan()
+        let item = try #require(journey.moments.first { $0.kind == .plan })
+        var gameRun = try AdaptiveReviewRun(finding: item.finding, revision: "pinned")
+        gameRun.reviewAnswer()
+        #expect(try GameReplay(game: gameRun.explorationGame()).moves.map(\.uci) == item.keyLine)
+        #expect(gameRun.acceptedMoves.isEmpty && !gameRun.attempt.cleanCompletion)
+    }
+
     @Test func pendingReplyRoundTripsAndCannotBePlayedTwice() throws {
         let puzzle = LearningTests.puzzle
         let board = try ChessPosition(fen: puzzle.positionFEN)

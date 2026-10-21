@@ -15,6 +15,7 @@ struct ReviewPracticeView: View {
     @EnvironmentObject private var model: AppModel
     @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.chessReduceMotion) private var reduceMotion
     @StateObject private var analyzer = PositionAnalysisController()
     @StateObject private var motion = TrainingBoardMotion()
     @State private var run: AdaptiveReviewRun?
@@ -26,6 +27,10 @@ struct ReviewPracticeView: View {
     @State private var pendingMove: ChessMove?
     @State private var work: Task<Void, Never>?
     @State private var ticket = UUID()
+    @State private var showingDetails = false
+    @State private var introPlaying = false
+    @State private var hasPlayedIntro = false
+    @State private var exploration: ChessGame?
     @State private var showingWhy = false
     @State private var showingHint = false
     @State private var solution: [String] = []
@@ -39,63 +44,56 @@ struct ReviewPracticeView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
-                HStack {
-                    Text(puzzle == nil ? "From your game" : "Separate catalogue position").font(.caption.weight(.semibold))
-                        .foregroundStyle(ChessMeStyle.muted)
-                    Spacer()
-                    if let puzzle { FavoriteButton(selected: model.isFavorite(puzzle)) { model.toggleFavorite(puzzle) } }
-                    else { FavoriteButton(selected: model.isFavorite(finding)) { model.toggleFavorite(finding) } }
-                }
-                if model.isDemo { Text("Sample practice · kept separate from your library").font(.caption) }
+            VStack(alignment: .leading, spacing: 12) {
                 if let run {
-                    if run.attempt.knownSeenBefore {
-                        Text(puzzle == nil ? "Previously reviewed position" : "Previously seen puzzle").font(.caption)
-                    }
-                    if run.attempt.topicCued {
-                        Text(puzzle == nil ? "The stated goal provides a topic cue." : "The related-position invitation gives a topic cue.").font(.caption)
-                    }
-                    Text(run.isFinished ? run.attempt.summary : run.goal.prompt)
-                        .font(ChessMeStyle.title(26)).accessibilityIdentifier("practice.prompt")
                     HStack {
-                        if checking {
-                            HStack(spacing: 8) {
-                                ProgressView()
-                                Text("Checking your move…")
-                            }.accessibilityElement(children: .combine).accessibilityIdentifier("practice.checking")
+                        Text(puzzle == nil ? "From your game" : "Lichess puzzle · \(puzzle!.rating)")
+                        Spacer()
+                        if model.isDemo { Text("Sample") }
+                    }.font(.caption).foregroundStyle(ChessMeStyle.muted)
+                    Text(run.isFinished ? run.attempt.summary : run.goal.prompt)
+                        .font(ChessMeStyle.title(22)).frame(minHeight: 54, alignment: .leading)
+                        .accessibilityIdentifier("practice.prompt")
+                    HStack(spacing: 8) {
+                        if checking || introPlaying || run.pendingReply != nil {
+                            ProgressView()
+                            Text(checking ? "Checking your move…" : introPlaying ? "Replaying previous moves…" : "Opponent's reply…")
+                                .accessibilityIdentifier("practice.checking")
                             Spacer()
-                            Button("Cancel check") { cancelCheck() }.accessibilityIdentifier("practice.cancelCheck")
-                        } else if run.pendingReply != nil {
-                            HStack(spacing: 8) {
-                                ProgressView()
-                                Text("Opponent's reply…")
-                            }.accessibilityElement(children: .combine)
+                            if checking {
+                                BoardIconButton(title: "Cancel check", symbol: "xmark") { cancelCheck() }
+                                    .accessibilityIdentifier("practice.cancelCheck")
+                            } else if introPlaying {
+                                BoardIconButton(title: "Skip replay", symbol: "forward.end.fill") { motion.stop(); introPlaying = false }
+                            }
                         } else {
                             Text(run.requiresMate ? "Complete the mating continuation." : run.acceptedDecisions <= run.requiredDecisions ?
                                  "\(run.acceptedDecisions) of \(run.requiredDecisions) key decisions accepted." :
-                                 "\(run.acceptedDecisions) decisions accepted; the stated goal still needs verification.")
-                                .font(.subheadline).accessibilityIdentifier("practice.decisions")
-                            if !run.isFinished {
-                                Spacer()
-                                Text("\(run.solver.rawValue.capitalized) to move").font(.caption)
-                            }
+                                 "\(run.acceptedDecisions) decisions accepted; verify the goal.")
+                                .accessibilityIdentifier("practice.decisions")
+                            Spacer()
                         }
-                    }.font(.subheadline).frame(minHeight: 44)
-                    ChessBoardView(position: motion.position ?? run.position, perspective: run.solver, selectedSquare: selected,
-                                   targets: legalTargets(run), highlightedSquares: motion.lastMove.map { [$0.from, $0.to] } ?? [],
-                                   rejectionCount: motion.rejectionCount, successCount: motion.successCount,
-                                   successSquare: motion.successSquare,
-                                   onSquare: run.isFinished || checking || run.pendingReply != nil ? nil : choose)
-                        .accessibilityIdentifier("practice.board")
-                    if let feedback = run.feedback {
-                        Text(feedback).font(.subheadline).accessibilityIdentifier("practice.feedback")
+                    }.font(.caption).frame(minHeight: 44)
+                    if run.attempt.outcome == .revealed {
+                        ReviewLineView(fen: solutionFEN ?? run.currentFEN,
+                                       moves: solution.isEmpty ? answerLine(for: run) : solution, perspective: run.solver)
+                    } else {
+                        ChessBoardView(position: motion.position ?? run.position, perspective: run.solver, selectedSquare: selected,
+                                       targets: legalTargets(run), highlightedSquares: motion.lastMove.map { [$0.from, $0.to] } ?? [],
+                                       rejectionCount: motion.rejectionCount, successCount: motion.successCount,
+                                       successSquare: motion.successSquare,
+                                       onSquare: run.isFinished || checking || introPlaying || run.pendingReply != nil ? nil : choose)
+                            .accessibilityIdentifier("practice.board")
                     }
-                    if let error {
-                        Text(error).font(.subheadline).foregroundStyle(ChessMeStyle.muted)
-                    }
+                    VStack(alignment: .leading, spacing: 8) {
+                        if let feedback = run.feedback { Text(feedback).accessibilityIdentifier("practice.feedback") }
+                        else if !run.isFinished && !checking && !introPlaying { Text("\(run.solver.rawValue.capitalized) to move").foregroundStyle(ChessMeStyle.muted) }
+                        if let error { Text(error).foregroundStyle(ChessMeStyle.muted) }
+                    }.font(.subheadline).frame(minHeight: 40, alignment: .topLeading)
                     if let pendingMove, !run.isFinished, !checking, run.pendingReply == nil,
                        error != nil || run.attempt.decisions.last?.grade == .ungraded {
-                        Button("Retry analysis") { check(pendingMove) }.accessibilityIdentifier("practice.retryAnalysis")
+                        Button("Retry analysis") { check(pendingMove) }.buttonStyle(.bordered)
+                            .accessibilityIdentifier("practice.retryAnalysis")
                     }
                     if run.isFinished { result(run) }
                     else { controls(run) }
@@ -114,7 +112,14 @@ struct ReviewPracticeView: View {
             .navigationBarTitleDisplayMode(.inline).toolbar(.visible, for: .navigationBar)
             .navigationBarBackButtonHidden(puzzle != nil)
             .toolbar { if puzzle != nil { ToolbarItem(placement: .topBarLeading) { Button("Back", action: finish) } } }
-            .task { prepare() }
+            .task {
+                prepare()
+                if !hasPlayedIntro, let run, let lead = model.practiceLeadIn(for: run) {
+                    hasPlayedIntro = true; introPlaying = true
+                    await motion.replay(lead, reduceMotion: reduceMotion)
+                    introPlaying = false
+                }
+            }
             .task(id: run?.pendingReply) {
                 guard run?.pendingReply != nil else { return }
                 // The persisted reply is the transition token. Restarting the view
@@ -123,7 +128,56 @@ struct ReviewPracticeView: View {
                 guard !Task.isCancelled, generation == model.reviewGeneration else { return }
                 mutate { $0.playReply() }
             }
-            .onDisappear { cancelCheck() }
+            .onDisappear { cancelCheck(); introPlaying = false }
+            .safeAreaInset(edge: .bottom) {
+                if run?.isFinished == true {
+                    HStack(spacing: 12) {
+                        BoardIconButton(title: "Explore continuation", symbol: "arrow.triangle.branch") { openExploration() }
+                            .accessibilityIdentifier(puzzle == nil ? "practice.exploreLine" : "practice.explorePuzzle")
+                        PrimaryButton(title: "Continue", symbol: "arrow.right", action: finish)
+                            .accessibilityIdentifier("practice.continue")
+                    }.padding(.horizontal, 22).padding(.vertical, 10).background(ChessMeStyle.paper)
+                }
+            }
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Menu {
+                        Button("Practice details", systemImage: "info.circle") { showingDetails = true }
+                        Button(puzzle.map { model.isFavorite($0) } ?? model.isFavorite(finding) ? "Remove saved position" : "Save position", systemImage: "heart") {
+                            if let puzzle { model.toggleFavorite(puzzle) } else { model.toggleFavorite(finding) }
+                        }
+                    } label: { Image(systemName: "ellipsis.circle").frame(width: 44, height: 44) }
+                        .accessibilityLabel("Practice details")
+                }
+            }
+            .sheet(isPresented: $showingDetails) {
+                NavigationStack {
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 16) {
+                            Text(finding.theme).font(ChessMeStyle.title(23))
+                            Text(finding.gameLabel)
+                            if let run {
+                                if run.isFinished, let connectionText = model.puzzleConnectionExplanation(for: run) ?? connectionText {
+                                    Text("Connection to your game").font(.headline)
+                                    Text(connectionText).accessibilityIdentifier("practice.connection")
+                                }
+                                if run.attempt.knownSeenBefore { Text("Previously seen position") }
+                                if run.attempt.topicCued { Text("The prompt provides a topic cue.") }
+                                Text("Completion, later recall and new-position results have separate evidence.").font(.caption)
+                                NavigationLink { ReviewAttemptView(attemptID: run.attempt.id) } label: { Label("Attempt history", systemImage: "clock") }
+                            }
+                            if let puzzle { Link("Puzzle \(puzzle.id) · Lichess · CC0", destination: puzzle.url) }
+                        }.padding(22)
+                    }.background(ChessMeStyle.paper).navigationTitle("Practice details")
+                        .toolbar { Button("Done") { showingDetails = false } }
+                }
+            }
+            .navigationDestination(isPresented: Binding(get: { exploration != nil }, set: { if !$0 { exploration = nil } })) {
+                if let exploration, let run {
+                    GameReplayExplorer(game: exploration, initialPly: exploration.moves.split(separator: " ").count,
+                                       useStoredSnapshot: true, snapshotID: run.id)
+                }
+            }
             .onChange(of: scenePhase) { _, phase in
                 if phase != .active { cancelCheck() }
             }
@@ -169,77 +223,71 @@ struct ReviewPracticeView: View {
     @ViewBuilder private func controls(_ run: AdaptiveReviewRun) -> some View {
         if !run.counterline.isEmpty {
             HStack {
-                Button("Show why") { mutate { $0.requestHelp(.counterline) }; showingWhy = true }
+                Button { mutate { $0.requestHelp(.counterline) }; showingWhy = true } label: { Label("Show why", systemImage: "questionmark.circle") }
                     .accessibilityIdentifier("practice.showWhy")
                 Spacer()
-                Button("Try again") {
-                    selected = nil; showingHint = false
-                    mutate { $0.feedback = nil; $0.counterline = [] }
+                Button { selected = nil; showingHint = false; mutate { $0.feedback = nil; $0.counterline = [] } } label: {
+                    Label("Try again", systemImage: "arrow.counterclockwise")
                 }.accessibilityIdentifier("practice.tryAgain")
-            }.frame(minHeight: 44)
+            }.buttonStyle(.bordered).font(.subheadline)
         }
         if showingHint { Text(hint(for: run)).font(.subheadline).accessibilityIdentifier("practice.hintText") }
-        HStack {
-            Button(run.hintLevel == 0 ? "Hint" : "More help") {
+        HStack(spacing: 12) {
+            BoardIconButton(title: run.hintLevel == 0 ? "Hint" : "More help", symbol: "lightbulb") {
                 mutate { $0.requestHelp(.hint) }; showingHint = true
             }.accessibilityIdentifier("practice.hint")
+            Menu {
+                Button("Show solution", systemImage: "eye") {
+                    solutionFEN = run.currentFEN; solution = answerLine(for: run)
+                    mutate { $0.reviewAnswer() }
+                }.accessibilityIdentifier("practice.reveal")
+                if model.practiceLeadIn(for: run) != nil {
+                    Button("Replay previous moves", systemImage: "arrow.counterclockwise") {
+                        Task {
+                            guard let lead = model.practiceLeadIn(for: run) else { return }
+                            introPlaying = true; await motion.replay(lead, reduceMotion: reduceMotion); introPlaying = false
+                        }
+                    }
+                }
+                Button("Explore position", systemImage: "arrow.triangle.branch") {
+                    mutate { $0.requestHelp(.line) }; openExploration()
+                }
+            } label: { Image(systemName: "ellipsis").frame(width: 44, height: 44).background(ChessMeStyle.green.opacity(0.07), in: RoundedRectangle(cornerRadius: 12)) }
+                .accessibilityLabel("More practice actions").accessibilityIdentifier("practice.options")
             Spacer()
-            Button("Show solution") {
-                solutionFEN = run.currentFEN; solution = answerLine(for: run)
-                mutate { $0.reviewAnswer() }
-            }.accessibilityIdentifier("practice.reveal")
-        }.frame(minHeight: 44).disabled(checking || run.pendingReply != nil)
-        Button("Skip and continue") { mutate { $0.skip() }; finish() }.frame(minHeight: 44)
-            .accessibilityIdentifier("practice.skip")
-        if let game = model.library.games.first(where: { $0.id == finding.gameID }) {
-            NavigationLink {
-                GameReplayExplorer(game: game, initialPly: max(0, (finding.moveNumber - 1) * 2 + (game.playerSide == .black ? 1 : 0)))
-            } label: { Text("Explore this game") }
-                .simultaneousGesture(TapGesture().onEnded { mutate { $0.requestHelp(.line) } })
-        }
+            Button { mutate { $0.skip() }; finish() } label: { Label("Skip", systemImage: "forward.end") }
+                .accessibilityIdentifier("practice.skip")
+        }.disabled(checking || introPlaying || run.pendingReply != nil)
     }
 
     @ViewBuilder private func result(_ run: AdaptiveReviewRun) -> some View {
-        Text("Completion records this attempt. Later recall and new-position results have their own evidence.")
-            .font(.caption).foregroundStyle(ChessMeStyle.muted)
         if run.attempt.outcome == .ungraded {
-            Button("Try another continuation") {
-                self.run = nil; generation = nil; error = nil
-                prepare(forceNewAttempt: true)
-            }.frame(minHeight: 44)
+            Button("Try another continuation") { self.run = nil; generation = nil; error = nil; prepare(forceNewAttempt: true) }
+                .buttonStyle(.bordered)
         }
-        if run.attempt.outcome == .revealed {
-            ReviewLineView(fen: solutionFEN ?? run.currentFEN,
-                           moves: solution.isEmpty ? answerLine(for: run) : solution, perspective: run.solver,
-                           label: "Requested solution · illustrative continuation")
-        }
-        if let connectionText { Text(connectionText).font(.subheadline) }
         if puzzle == nil, let connection = run.relatedOffer {
             PaperCard {
-                VStack(alignment: .leading, spacing: 10) {
-                    Text("Try this idea in another position?").font(ChessMeStyle.title(21))
-                    Text("Practise this lesson's idea in a different position.").font(.subheadline)
-                    Text("Optional · Lichess catalogue · estimated \(connection.puzzle.rating)").font(.caption)
-                    if model.hasSeenReviewPuzzle(connection.puzzle) { Text("Previously seen puzzle").font(.caption) }
-                    NavigationLink {
-                        ReviewPracticeView(finding: connection.puzzle.reviewFinding, puzzle: connection.puzzle,
-                                           linkedTargetID: run.targetID, connectionText: connection.explanation,
-                                           sessionID: sessionID, returnGameID: returnGameID, parentRunID: sessionID == nil ? run.id : nil)
-                    } label: { Text("Try related puzzle") }.accessibilityIdentifier("practice.related")
+                HStack(spacing: 14) {
+                    ChessBoardView(position: (try? ChessPosition(fen: connection.puzzle.positionFEN)) ?? .initial)
+                        .frame(width: 60, height: 60).accessibilityHidden(true)
+                    VStack(alignment: .leading, spacing: 5) {
+                        Text("Same idea, new position").font(.subheadline.weight(.semibold))
+                        Text("Optional puzzle · \(connection.puzzle.rating)").font(.caption).foregroundStyle(ChessMeStyle.muted)
+                        NavigationLink {
+                            ReviewPracticeView(finding: connection.puzzle.reviewFinding, puzzle: connection.puzzle,
+                                               linkedTargetID: run.targetID, connectionText: connection.explanation,
+                                               sessionID: sessionID, returnGameID: returnGameID, parentRunID: sessionID == nil ? run.id : nil)
+                        } label: { Label("Try related puzzle", systemImage: "play.fill") }.accessibilityIdentifier("practice.related")
+                    }
                 }
             }
         }
-        if let puzzle {
-            Link("Puzzle \(puzzle.id) · Lichess · CC0", destination: puzzle.url).font(.caption)
-            let snapshot = ChessGame(id: "pgn-catalogue-" + puzzle.id, username: "Puzzle", white: "Catalogue position",
-                black: "Lichess puzzle " + puzzle.id, playedAt: run.attempt.startedAt, playerSide: run.solver,
-                moves: ([puzzle.setupMove] + run.acceptedMoves).joined(separator: " "), initialFEN: puzzle.setupFEN, status: "resign")
-            NavigationLink {
-                GameReplayExplorer(game: snapshot, initialPly: 1 + run.acceptedMoves.count, useStoredSnapshot: true, snapshotID: run.id)
-            } label: { Text("Explore this catalogue position") }.accessibilityIdentifier("practice.explorePuzzle")
-        }
-        PrimaryButton(title: "Continue", symbol: "arrow.right", action: finish).accessibilityIdentifier("practice.continue")
-        NavigationLink { ReviewAttemptView(attemptID: run.attempt.id) } label: { Text("View attempt details") }
+    }
+
+    private func openExploration() {
+        guard let run else { return }
+        do { exploration = try model.practiceExploration(for: run) }
+        catch { self.error = error.localizedDescription }
     }
 
     private func prepare(forceNewAttempt: Bool = false) {
@@ -279,6 +327,11 @@ struct ReviewPracticeView: View {
         let nextTicket = UUID(); ticket = nextTicket; pendingMove = move; selected = nil
         error = nil; showingHint = false
         motion.previewAttempt(move, in: board)
+        var reused = run
+        if reused.submitStoredMove(move, verifiedDepth: model.storedDecisionDepth(for: run, move: move)) {
+            mutate { $0 = reused }; motion.stop(); motion.celebrate(at: move.to)
+            return
+        }
         if (try? board.applying(move).outcome()) == .checkmate(winner: run.solver) {
             applyFeedback(move, evaluation: PositionEvaluation(moves: [], completedDepth: 0, nodes: 0))
             return
