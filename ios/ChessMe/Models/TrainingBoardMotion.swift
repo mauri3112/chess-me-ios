@@ -19,6 +19,14 @@ final class TrainingBoardMotion: ObservableObject {
     func shake() { rejectionCount += 1 }
     func celebrate(at square: Int) { successSquare = square; successCount += 1 }
 
+    /// Show the player's legal input while grading is pending. The exercise's
+    /// accepted position remains owned by its run until analysis completes.
+    func previewAttempt(_ move: ChessMove, in board: ChessPosition) {
+        guard let next = try? board.applying(move) else { return }
+        stop()
+        position = next; lastMove = move; isAnimating = true
+    }
+
     func replay(_ history: MoveHistory, reduceMotion: Bool) async {
         guard !history.moves.isEmpty else { return }
         stop()

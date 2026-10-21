@@ -5,6 +5,24 @@ import ChessMeCore
 
 final class AnalysisFlowTests: XCTestCase {
     @MainActor
+    func testAnOlderReturnAnimationCannotClearANewPendingAttempt() async throws {
+        let motion = TrainingBoardMotion()
+        let original = ChessPosition.initial
+        let oldMove = try ChessMove(uci: "e2e4")
+        let returning = Task { await motion.returnAttempt(oldMove, in: original, rejected: true, reduceMotion: true) }
+        try await Task.sleep(for: .milliseconds(20))
+        let newMove = try ChessMove(uci: "d2d4")
+        motion.previewAttempt(newMove, in: original)
+        await returning.value
+        XCTAssertEqual(motion.position, try original.applying(newMove))
+        XCTAssertEqual(motion.lastMove, newMove)
+        XCTAssertEqual(motion.rejectionCount, 0)
+        motion.stop()
+        XCTAssertNil(motion.position)
+        XCTAssertFalse(motion.isAnimating)
+    }
+
+    @MainActor
     func testBoardMotionCancellationCannotRestoreAnEarlierLessonAndRejectionReturnsQuickly() async throws {
         let motion = TrainingBoardMotion()
         let history = try MoveHistory(position: .initial).appending([ChessMove(uci: "e2e4"), ChessMove(uci: "e7e5")])

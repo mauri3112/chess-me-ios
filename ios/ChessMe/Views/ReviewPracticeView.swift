@@ -16,6 +16,7 @@ struct ReviewPracticeView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scenePhase
     @StateObject private var analyzer = PositionAnalysisController()
+    @StateObject private var motion = TrainingBoardMotion()
     @State private var run: AdaptiveReviewRun?
     @State private var generation: UUID?
     @State private var selected: Int?
@@ -56,21 +57,45 @@ struct ReviewPracticeView: View {
                     }
                     Text(run.isFinished ? run.attempt.summary : run.goal.prompt)
                         .font(ChessMeStyle.title(26)).accessibilityIdentifier("practice.prompt")
-                    Text(run.requiresMate ? "Complete the mating continuation." : run.acceptedDecisions <= run.requiredDecisions ?
-                         "\(run.acceptedDecisions) of \(run.requiredDecisions) key decisions accepted." :
-                         "\(run.acceptedDecisions) decisions accepted; the stated goal still needs verification.")
-                        .font(.subheadline).accessibilityIdentifier("practice.decisions")
-                    ChessBoardView(position: run.position, perspective: run.solver, selectedSquare: selected,
-                                   targets: legalTargets(run), onSquare: run.isFinished || checking || run.pendingReply != nil ? nil : choose)
+                    HStack {
+                        if checking {
+                            HStack(spacing: 8) {
+                                ProgressView()
+                                Text("Checking your move…")
+                            }.accessibilityElement(children: .combine).accessibilityIdentifier("practice.checking")
+                            Spacer()
+                            Button("Cancel check") { cancelCheck() }.accessibilityIdentifier("practice.cancelCheck")
+                        } else if run.pendingReply != nil {
+                            HStack(spacing: 8) {
+                                ProgressView()
+                                Text("Opponent's reply…")
+                            }.accessibilityElement(children: .combine)
+                        } else {
+                            Text(run.requiresMate ? "Complete the mating continuation." : run.acceptedDecisions <= run.requiredDecisions ?
+                                 "\(run.acceptedDecisions) of \(run.requiredDecisions) key decisions accepted." :
+                                 "\(run.acceptedDecisions) decisions accepted; the stated goal still needs verification.")
+                                .font(.subheadline).accessibilityIdentifier("practice.decisions")
+                            if !run.isFinished {
+                                Spacer()
+                                Text("\(run.solver.rawValue.capitalized) to move").font(.caption)
+                            }
+                        }
+                    }.font(.subheadline).frame(minHeight: 44)
+                    ChessBoardView(position: motion.position ?? run.position, perspective: run.solver, selectedSquare: selected,
+                                   targets: legalTargets(run), highlightedSquares: motion.lastMove.map { [$0.from, $0.to] } ?? [],
+                                   rejectionCount: motion.rejectionCount, successCount: motion.successCount,
+                                   successSquare: motion.successSquare,
+                                   onSquare: run.isFinished || checking || run.pendingReply != nil ? nil : choose)
                         .accessibilityIdentifier("practice.board")
-                    if checking { ProgressView("Checking your move…").accessibilityIdentifier("practice.checking") }
-                    else if run.pendingReply != nil { ProgressView("Opponent's reply…") }
                     if let feedback = run.feedback {
                         Text(feedback).font(.subheadline).accessibilityIdentifier("practice.feedback")
                     }
                     if let error {
                         Text(error).font(.subheadline).foregroundStyle(ChessMeStyle.muted)
-                        if let pendingMove, !run.isFinished { Button("Retry analysis") { check(pendingMove) } }
+                    }
+                    if let pendingMove, !run.isFinished, !checking, run.pendingReply == nil,
+                       error != nil || run.attempt.decisions.last?.grade == .ungraded {
+                        Button("Retry analysis") { check(pendingMove) }.accessibilityIdentifier("practice.retryAnalysis")
                     }
                     if run.isFinished { result(run) }
                     else { controls(run) }
@@ -98,9 +123,9 @@ struct ReviewPracticeView: View {
                 guard !Task.isCancelled, generation == model.reviewGeneration else { return }
                 mutate { $0.playReply() }
             }
-            .onDisappear { ticket = UUID(); work?.cancel(); checking = false }
+            .onDisappear { cancelCheck() }
             .onChange(of: scenePhase) { _, phase in
-                if phase != .active { ticket = UUID(); work?.cancel(); checking = false }
+                if phase != .active { cancelCheck() }
             }
             .onChange(of: run?.isFinished) { _, finished in
                 if finished == true, puzzle == nil, run?.relatedOffer == nil,
@@ -113,14 +138,14 @@ struct ReviewPracticeView: View {
                 }
             }
             .onChange(of: model.reviewGeneration) { _, _ in
-                ticket = UUID(); work?.cancel(); run = nil; checking = false
+                cancelCheck(recordInterruption: false); run = nil
                 error = "The local context changed. Return to your games or start a retained lesson again."
             }
             .onChange(of: sourceStatus) { _, _ in
                 guard let run, run.attempt.kind == .game,
                       let target = model.reviewState.targets.first(where: { $0.id == run.targetID }),
                       target.invalidated || target.revision != run.revision else { return }
-                ticket = UUID(); work?.cancel(); self.run = nil; checking = false
+                cancelCheck(recordInterruption: false); self.run = nil
                 error = "The source lesson changed. This attempt remains in history; return to its updated review to continue."
             }
             .confirmationDialog("Promote pawn", isPresented: Binding(get: { !promotions.isEmpty }, set: { if !$0 { promotions = [] } })) {
@@ -250,13 +275,15 @@ struct ReviewPracticeView: View {
     private func check(_ move: ChessMove) {
         guard let run, let generation, generation == model.reviewGeneration, !checking, !run.isFinished else { return }
         let board = run.position, id = run.id, history = run.history, revision = run.revision
+        guard board.legalMoves().contains(move) else { return }
+        let nextTicket = UUID(); ticket = nextTicket; pendingMove = move; selected = nil
+        error = nil; showingHint = false
+        motion.previewAttempt(move, in: board)
         if (try? board.applying(move).outcome()) == .checkmate(winner: run.solver) {
-            selected = nil
-            mutate { $0.submit(move, evaluation: PositionEvaluation(moves: [], completedDepth: 0, nodes: 0)) }
+            applyFeedback(move, evaluation: PositionEvaluation(moves: [], completedDepth: 0, nodes: 0))
             return
         }
-        let nextTicket = UUID(); ticket = nextTicket; pendingMove = move; selected = nil
-        checking = true; error = nil; showingHint = false
+        checking = true
         work?.cancel()
         work = Task {
             do {
@@ -265,16 +292,32 @@ struct ReviewPracticeView: View {
                 guard !Task.isCancelled, ticket == nextTicket, generation == model.reviewGeneration,
                       self.run?.id == id, self.run?.revision == revision, self.run?.currentFEN == board.fen else { return }
                 checking = false
-                mutate { $0.submit(move, evaluation: evaluation) }
+                applyFeedback(move, evaluation: evaluation)
             } catch {
                 guard !Task.isCancelled, ticket == nextTicket, generation == model.reviewGeneration else { return }
                 checking = false
+                motion.stop()
                 self.error = "Your move is unassessed: \(error.localizedDescription)"
                 mutate {
                     $0.attempt.decisions.append(ReviewDecision(positionFEN: board.fen, move: move.uci, grade: .ungraded))
                 }
             }
         }
+    }
+    private func applyFeedback(_ move: ChessMove, evaluation: PositionEvaluation) {
+        let previousCount = run?.attempt.decisions.count ?? 0
+        mutate { $0.submit(move, evaluation: evaluation) }
+        motion.stop()
+        guard let run, run.attempt.decisions.count > previousCount, let decision = run.attempt.decisions.last else { return }
+        if decision.grade == .accepted { motion.celebrate(at: move.to) }
+        else if decision.grade == .mistake { motion.shake() }
+    }
+    private func cancelCheck(recordInterruption: Bool = true) {
+        let wasChecking = checking
+        ticket = UUID(); work?.cancel(); work = nil; checking = false; motion.stop()
+        guard recordInterruption, wasChecking, let run, !run.isFinished, let pendingMove else { return }
+        error = "Move checking stopped. Retry analysis when you are ready."
+        mutate { $0.attempt.decisions.append(ReviewDecision(positionFEN: run.currentFEN, move: pendingMove.uci, grade: .ungraded)) }
     }
     private func mutate(_ change: (inout AdaptiveReviewRun) -> Void) {
         guard var value = run, let generation, generation == model.reviewGeneration else { return }

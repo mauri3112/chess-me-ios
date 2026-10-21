@@ -28,6 +28,42 @@ final class ReviewExperienceUITests: XCTestCase {
     }
     override func tearDownWithError() throws { app.terminate(); app = nil }
 
+    func testNonMatingLessonMoveAppearsBeforeEngineFeedback() {
+        openGame(); tap("review.start"); tap("game.practiceMoment")
+        XCTAssertTrue(app.buttons["board.square.d4"].waitForExistence(timeout: 5))
+        app.buttons["board.square.d4"].tap()
+        app.buttons["board.square.e5"].tap()
+        let destination = app.descendants(matching: .any).matching(identifier: "board.square.e5").firstMatch
+        capture("Non-mating lesson move responds immediately")
+        XCTAssertTrue(destination.label.contains("white pawn"),
+                      "A legal attempt should move immediately while engine feedback is pending: \(destination.label)")
+        let accepted = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label BEGINSWITH '1 of 2'"),
+                                                 object: app.staticTexts["practice.decisions"])
+        XCTAssertEqual(XCTWaiter.wait(for: [accepted], timeout: 20), .completed)
+        XCTAssertTrue(app.buttons["board.square.e5"].label.contains("white pawn"))
+        XCTAssertTrue(app.buttons["board.square.a2"].label.contains("black rook"), "The opponent should reply automatically.")
+        capture("Non-mating lesson move accepted and opponent replied")
+    }
+
+    func testPendingMoveCanBeCancelledAndRetriedWithoutAcceptingIt() {
+        tap("app.settings"); tap("settings.engines"); tap("Deep")
+        app.navigationBars.buttons.firstMatch.tap(); tap("settings.done")
+        openGame(); tap("review.start"); tap("game.practiceMoment")
+        app.buttons["board.square.d4"].tap(); app.buttons["board.square.e5"].tap()
+        tap("practice.cancelCheck")
+        XCTAssertTrue(app.buttons["board.square.d4"].label.contains("white pawn"))
+        XCTAssertTrue(app.buttons["board.square.e5"].label.contains("black pawn"))
+        XCTAssertTrue(app.staticTexts["practice.decisions"].label.hasPrefix("0 of 2"))
+        XCTAssertTrue(app.buttons["practice.retryAnalysis"].exists)
+        tap("practice.retryAnalysis")
+        let destination = app.descendants(matching: .any).matching(identifier: "board.square.e5").firstMatch
+        XCTAssertTrue(destination.label.contains("white pawn"))
+        tap("practice.cancelCheck")
+        tap("practice.skip")
+        XCTAssertTrue(app.staticTexts["0 of 1 core positions completed."].waitForExistence(timeout: 5))
+        capture("Cancelled lesson checks do not complete the exercise")
+    }
+
     func testOverviewPlanStepOptionalPracticeAndExactReturn() {
         openGame()
         XCTAssertTrue(app.buttons["review.mainTakeaway"].waitForExistence(timeout: 10))
