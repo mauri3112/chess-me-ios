@@ -46,7 +46,19 @@ final class DeviceAnalysisCoordinator {
             })
         }
         model.updateLibrary { snapshot in
-            for index in (snapshot.localAnalysisJobs ?? []).indices { snapshot.localAnalysisJobs?[index].recoverAfterInterruption() }
+            for index in (snapshot.localAnalysisJobs ?? []).indices {
+                snapshot.localAnalysisJobs?[index].recoverAfterInterruption()
+                if snapshot.localAnalysisJobs?[index].configuration.engine == .stockfish,
+                   !StockfishEngine.isAvailable, snapshot.localAnalysisJobs?[index].state != .completed {
+                    snapshot.localAnalysisJobs?[index].state = .paused
+                    snapshot.localAnalysisJobs?[index].message = "Saved Stockfish work is retained. Start a new on-device review with Arasan to continue."
+                }
+                if let job = snapshot.localAnalysisJobs?[index], let checkpoint = job.checkpoint,
+                   job.state != .completed, checkpoint.configurationID != job.configuration.options.configurationID {
+                    snapshot.localAnalysisJobs?[index].state = .paused
+                    snapshot.localAnalysisJobs?[index].message = "Saved analysis is retained. Start a new review with the current search settings."
+                }
+            }
         }
         model.reconcileLocalAnalysisResults()
         if model.library.localAnalysisJobs?.isEmpty == false { _ = model.persist() }
@@ -83,7 +95,10 @@ final class DeviceAnalysisCoordinator {
             var jobs = snapshot.localAnalysisJobs ?? []
             for game in games where game.isFinished {
                 let signature = configuration.options.configurationID
-                if let existing = jobs.firstIndex(where: { $0.gameID == game.id && $0.matches(configuration: configuration, level: level) }) {
+                if let existing = jobs.firstIndex(where: {
+                    $0.gameID == game.id && $0.matches(configuration: configuration, level: level) &&
+                    ($0.checkpoint == nil || $0.checkpoint?.configurationID == $0.configuration.options.configurationID)
+                }) {
                     if scheduledByUser && jobs[existing].state != .completed {
                         jobs[existing].nightOnly = nightOnly
                         jobs[existing].scheduledByUser = true
@@ -283,10 +298,11 @@ final class DeviceAnalysisCoordinator {
 
     private func waitingReason(for job: LocalAnalysisJob) -> String? {
         guard let model else { return "Library unavailable" }
+        if job.configuration.engine == .stockfish && !StockfishEngine.isAvailable { return "Start a new Arasan review from this game." }
         if job.requiresPro && !model.subscriptions.isPro { return "Pro access is needed to resume this review." }
         if let level = job.level, !Self.hardware.supports(level) { return level.requirement }
         if let memoryPressureUntil, Date() < memoryPressureUntil { return "Waiting for device memory to recover." }
-        if job.configuration.engine == .stockfish,
+        if job.configuration.engine.isNeural,
            LocalAnalysisMemoryPolicy.cacheMegabytes(requested: job.configuration.memoryMB, availableToAppMB: availableMemoryMB()) == nil {
             return LocalAnalysisResourceError.insufficientMemory.localizedDescription
         }
@@ -434,7 +450,7 @@ final class DeviceAnalysisCoordinator {
                     $0.state = analysis.isComplete ? .completed : .queued
                     $0.message = analysis.isComplete ? "Review ready" : "\(analysis.analyzedPlies)/\(analysis.totalPlies) decisions saved"
                 }
-                if analysis.isComplete, job.configuration.engine == .stockfish, let level = job.level,
+                if analysis.isComplete, job.configuration.engine.isNeural, let level = job.level,
                    let finished = model.library.localAnalysisJobs?.first(where: { $0.id == job.id }),
                    finished.timedDecisions == analysis.totalPlies, let seconds = finished.processingSeconds {
                     model.recordLocalAnalysisTiming(LocalAnalysisTiming(level: level,

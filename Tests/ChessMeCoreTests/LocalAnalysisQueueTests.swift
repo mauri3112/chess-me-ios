@@ -133,7 +133,7 @@ final class LocalAnalysisQueueTests: XCTestCase {
         low.depth = 24; low.secondsPerPosition = 15; low.searchNodeLimit = 5_000_000; low.memoryMB = 32
         XCTAssertTrue(high.covers(low))
         XCTAssertFalse(low.covers(high))
-        low.engine = .arasan
+        low.engine = .stockfish
         XCTAssertFalse(high.covers(low))
     }
 }

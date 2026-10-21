@@ -34,7 +34,7 @@ struct EngineSettingsView: View {
                 Text("\(model.engineConfiguration.engine.title) · up to \(model.engineConfiguration.secondsPerPosition)s per position")
                     .font(.caption).foregroundStyle(ChessMeStyle.muted)
                 DisclosureGroup("Advanced") {
-                    LabeledContent("Engine", value: "Stockfish 19").accessibilityIdentifier("engine.device")
+                    LabeledContent("Engine", value: model.engineConfiguration.engine.title).accessibilityIdentifier("engine.device")
                     Text(model.engineConfiguration.engine.detail).font(.caption).foregroundStyle(ChessMeStyle.muted)
                     Stepper("Maximum depth: \(model.engineConfiguration.depth)", value: $model.engineConfiguration.depth,
                             in: 1...model.engineConfiguration.engine.maximumDepth)

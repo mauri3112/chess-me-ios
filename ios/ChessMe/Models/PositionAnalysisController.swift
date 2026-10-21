@@ -102,10 +102,10 @@ final class PositionAnalysisController: ObservableObject {
         }, uniquingKeysWith: { first, _ in first })
     }
 
-    func evaluateAttempt(move: ChessMove, position: ChessPosition, configuration: DeviceEngineConfiguration) async throws -> PositionEvaluation {
+    func evaluateAttempt(move: ChessMove, position: ChessPosition, history: [String] = [], configuration: DeviceEngineConfiguration) async throws -> PositionEvaluation {
         let work = Task.detached(priority: .utility) {
             try LocalAnalyzer(options: configuration.options).evaluate(
-                position: position, requiredMove: move, cancellation: { Task.isCancelled })
+                position: position, repetitionHistory: history, requiredMove: move, cancellation: { Task.isCancelled })
         }
         return try await withTaskCancellationHandler(operation: { try await work.value }, onCancel: { work.cancel() })
     }

@@ -4,7 +4,7 @@ import CArasan
 public enum ArasanEngine {
     public static let version = "arasan-26.0-v8-20260622"
     public static var license: String {
-        guard let url = Bundle.module.url(forResource: "ArasanLicense", withExtension: "txt", subdirectory: "Resources") else { return "" }
+        guard let url = CoreResources.url(forResource: "ArasanLicense", withExtension: "txt", subdirectory: "Resources") else { return "" }
         return (try? String(contentsOf: url, encoding: .utf8)) ?? ""
     }
 }
@@ -63,7 +63,7 @@ struct ArasanAnalyzer {
         guard position.outcome(repetitionCount: repetitionHistory.filter { $0 == position.repetitionKey }.count + 1) == .ongoing else {
             return PositionEvaluation(moves: [], completedDepth: 0, nodes: 0)
         }
-        guard let network = Bundle.module.url(forResource: "arasanv8-20260622", withExtension: "nnue", subdirectory: "Resources") else {
+        guard let network = CoreResources.url(forResource: "arasanv8-20260622", withExtension: "nnue", subdirectory: "Resources") else {
             throw ArasanError.missingNetwork
         }
         let callbacks = ArasanCallbacks(position: position, cancellation: cancellation, update: update)
@@ -71,7 +71,7 @@ struct ArasanAnalyzer {
         let code = chessme_arasan_analyze(network.path, position.fen, repetitionHistory.joined(separator: "\n"),
                                         requiredMove?.uci ?? "", Int32(options.maximumDepth), Int32(options.memoryMegabytes),
                                         Int32((options.timeLimitSeconds ?? 3) * 1_000),
-                                        UInt64(options.nodesPerMove * max(1, position.legalMoves().count)), context,
+                                        UInt64(options.searchNodeLimit ?? (options.nodesPerMove * max(1, position.legalMoves().count))), context,
             { pointer in
                 guard let pointer else { return 1 }
                 return Unmanaged<ArasanCallbacks>.fromOpaque(pointer).takeUnretainedValue().cancellation() ? 1 : 0

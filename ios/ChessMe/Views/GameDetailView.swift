@@ -1,8 +1,21 @@
 import SwiftUI
 import ChessMeCore
 
-struct GameDetailView: View {
+struct GameReplayExplorer: View {
     let game: ChessGame
+    var initialPly = 0
+    var useStoredSnapshot = false
+    var snapshotID: String? = nil
+    @Environment(\.dismiss) private var dismiss
+    @State private var parkedVariation: GameReplay?
+    @State private var lineSaveMessage: String?
+    @State private var moveExplanation: String?
+    @State private var explainingMove = false
+    @State private var explanationTask: Task<Void, Never>?
+    @State private var explanationRequest = UUID()
+    @State private var engineReplies = false
+    @State private var replyTask: Task<Void, Never>?
+    @State private var contextGeneration: UUID?
     @EnvironmentObject private var model: AppModel
     @Environment(\.scenePhase) private var scenePhase
     @State private var analyzer = PositionAnalysisController()
@@ -18,15 +31,15 @@ struct GameDetailView: View {
     @State private var promotionMoves: [ChessMove] = []
     @State private var variationAssessment: MoveAssessment?
     @State private var showEngineSettings = false
-    @State private var exploring = false
+    @State private var exploring = true
     @State private var momentIndex = 0
     @State private var highlightedQuality: MoveQuality?
     private var moments: [MoveFinding] {
         (analysis?.findings ?? []).sorted { $0.moveNumber < $1.moveNumber }
     }
     private var moment: MoveFinding? { moments.indices.contains(momentIndex) ? moments[momentIndex] : nil }
-    private var analysis: GameAnalysis? { model.gameAnalysis(for: game.id) }
-    private var savedGame: ChessGame { model.library.games.first { $0.id == game.id } ?? game }
+    private var analysis: GameAnalysis? { useStoredSnapshot ? nil : model.gameAnalysis(for: game.id) }
+    private var savedGame: ChessGame { useStoredSnapshot ? game : (model.library.games.first { $0.id == game.id } ?? game) }
     private var openingLine: OpeningLine? { model.openingLine(for: savedGame) }
     private var bookPlies: Set<Int> {
         let nonBook = Set((analysis?.moveAssessments ?? []).filter { $0.quality != .book }.map(\.ply))
@@ -70,13 +83,17 @@ struct GameDetailView: View {
             VStack(alignment: .leading, spacing: 18) {
                 if model.isDemo { Eyebrow(text: "Sample game") }
                 HStack(alignment: .center, spacing: 12) {
-                    GamePlayerNames(game: savedGame, outcome: model.outcome(for: savedGame), prominent: true)
+                    Group {
+                    if useStoredSnapshot {
+                        Text("Position exploration").font(ChessMeStyle.title(26))
+                        Text("Stored context · moves tried here are variations, not a played source-game continuation.").font(.caption)
+                    } else {
+                        GamePlayerNames(game: savedGame, outcome: model.outcome(for: savedGame), prominent: true)
+                    }
+                    }
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .accessibilityIdentifier("game.match")
-                    Button(exploring ? "Review" : "Explore") {
-                        exploring.toggle()
-                        if !exploring { selectMoment(momentIndex) }
-                    }.font(.subheadline.weight(.semibold)).fixedSize(horizontal: true, vertical: false)
+                    Button("Return to review") { dismiss() }.font(.subheadline.weight(.semibold)).fixedSize(horizontal: true, vertical: false)
                         .frame(minHeight: 44).accessibilityIdentifier("game.explore")
                 }
                 if let opening = openingLine?.opening {
@@ -174,11 +191,45 @@ struct GameDetailView: View {
                     }
                     if exploring || moments.isEmpty {
                         MoveHistoryView(history: replay.moveHistory, selectedIndex: replay.index, prefix: "game", title: nil, showsNavigation: false, bookPlies: bookPlies) { index in exploring = true; navigate(index) }
+                        if !replay.isVariation {
+                            let rootFinding = analysis?.findings.first { $0.positionFEN == replay.position.fen }
+                            if let rootFinding {
+                                VStack(alignment: .leading, spacing: 10) {
+                                    Text("Compare from this position").font(.subheadline.weight(.semibold))
+                                    Button("Play the game's choice") {
+                                        if let move = try? ChessMove(uci: rootFinding.playedMove) { play(move) }
+                                    }.accessibilityIdentifier("game.comparePlayed")
+                                    Button("Play the saved suggestion") {
+                                        if let move = try? ChessMove(uci: rootFinding.bestMove) { play(move) }
+                                    }.accessibilityIdentifier("game.compareSuggested")
+                                    Text("Or play your own move. Explain this move compares it at the same root with the game's history.").font(.caption)
+                                }
+                            }
+                        }
                         if replay.isVariation {
                             Text(replay.variationSAN).font(.subheadline.monospaced()).accessibilityIdentifier("game.variation")
-                            Button("Return to game") { navigate(replay.index) }.font(.subheadline.weight(.semibold))
+                            HStack {
+                                Button("Save line") {
+                                    lineSaveMessage = model.saveReviewLine(game: savedGame, replay: replay,
+                                        expectedGeneration: contextGeneration, snapshotID: snapshotID) ?
+                                        (model.isDemo ? "Saved in sample collection" : "Saved on this device") : nil
+                                }.accessibilityIdentifier("game.saveLine")
+                                Spacer()
+                                Button("Explain this move") { explainSelectedMove(replay) }
+                                    .disabled(explainingMove).accessibilityIdentifier("game.explainMove")
+                            }.frame(minHeight: 44)
+                            if let lineSaveMessage { Text(lineSaveMessage).font(.caption).accessibilityIdentifier("game.lineSaved") }
+                            if explainingMove { ProgressView("Checking this move") }
+                            if let moveExplanation { Text(moveExplanation).font(.subheadline).accessibilityIdentifier("game.moveExplanation") }
+                            ReviewSaveNotice()
+                            Button("Return to game") { parkedVariation = replay; navigate(replay.index) }.font(.subheadline.weight(.semibold))
                                 .accessibilityIdentifier("game.return")
                         } else {
+                            if let parkedVariation {
+                                Button("Back to my line") { self.replay = parkedVariation }
+                                    .accessibilityIdentifier("game.restoreLine")
+                                Button("Discard temporary line") { self.parkedVariation = nil }
+                            }
                             Slider(value: Binding(get: { Double(self.replay?.index ?? 0) }, set: { navigate(Int($0)) }), in: 0...Double(max(1, replay.moves.count)), step: 1)
                                 .accessibilityLabel("Game move").accessibilityIdentifier("game.timeline")
                         }
@@ -191,10 +242,14 @@ struct GameDetailView: View {
                                 }
                             }
                         }
-                        if exploring { AnalysisPanel(position: replay.position, controller: analyzer, configuration: model.effectiveEngineConfiguration) }
+                        if exploring {
+                            Toggle("Engine replies", isOn: $engineReplies).font(.subheadline).accessibilityIdentifier("game.engineReplies")
+                            AnalysisPanel(position: replay.position, controller: analyzer, configuration: model.effectiveEngineConfiguration)
+                        }
                     }
                 }
                 if let replayError { Text(replayError).font(.footnote).foregroundStyle(.red) }
+                if !useStoredSnapshot {
                 if let job = model.localAnalysisJob(for: game.id) {
                     PaperCard {
                         if analysis?.isComplete == true, job.isPending {
@@ -263,7 +318,8 @@ struct GameDetailView: View {
                     PrimaryButton(title: model.cloudIsRunning ? "Submitting cloud review..." : "Queue a deeper cloud review", symbol: "cloud") { if model.cloudIsReady { confirmCloud = true } else { showCloudSetup = true } }
                         .disabled(model.isBusy || model.cloudReview(for: game.id)?.isPending == true)
                 }
-                if exploring, let url = game.url { Link("Open original game on Lichess", destination: url).font(.subheadline) }
+                }
+                if exploring, !useStoredSnapshot, let url = game.url { Link("Open original game on Lichess", destination: url).font(.subheadline) }
                 if let notice = model.notice { Text(notice).font(.footnote).foregroundStyle(ChessMeStyle.muted) }
             }.padding(22)
         }
@@ -273,12 +329,13 @@ struct GameDetailView: View {
         .toolbar(.visible, for: .navigationBar)
         .toolbar { ToolbarItem(placement: .topBarTrailing) { FavoriteButton(selected: model.isFavorite(game)) { model.toggleFavorite(game) } } }
         .task {
+            contextGeneration = model.reviewGeneration
             do {
                 let game = savedGame
                 let work = Task.detached(priority: .userInitiated) { try GameReplay(game: game) }
                 replay = try await withTaskCancellationHandler(operation: { try await work.value }, onCancel: { work.cancel() })
                 try Task.checkCancellation()
-                selectMoment(0)
+                navigate(initialPly)
                 rebuildClockTimeline()
                 updateAnalysis()
                 await loadClocks()
@@ -287,6 +344,9 @@ struct GameDetailView: View {
             catch { replayError = error.localizedDescription }
         }
         .onChange(of: savedGame.clockData) { _, _ in rebuildClockTimeline() }
+        .onChange(of: model.reviewGeneration) { _, _ in
+            analyzer.stop(); explanationTask?.cancel(); replyTask?.cancel(); replay = nil; dismiss()
+        }
         .onChange(of: analysis) { previous, current in
             if !exploring, !moments.isEmpty {
                 let earlier = (previous?.findings ?? []).sorted { $0.moveNumber < $1.moveNumber }
@@ -298,13 +358,19 @@ struct GameDetailView: View {
                 self.highlightedQuality = nil
             }
         }
-        .onChange(of: replay?.position) { _, _ in updateAnalysis() }
+        .onChange(of: replay?.position) { _, _ in
+            replyTask?.cancel(); replyTask = nil
+            explanationRequest = UUID(); explanationTask?.cancel(); moveExplanation = nil; explainingMove = false
+            updateAnalysis()
+        }
         .onChange(of: model.engineConfiguration) { _, _ in updateAnalysis() }
+        .onChange(of: engineReplies) { _, enabled in if enabled { scheduleReply() } else { replyTask?.cancel(); replyTask = nil } }
+        .onReceive(analyzer.$isCalculating) { calculating in if !calculating { scheduleReply() } }
         .onChange(of: model.isAnalyzing) { _, busy in if busy { analyzer.stop() } else { updateAnalysis() } }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active { updateAnalysis() } else { analyzer.stop() }
         }
-        .onDisappear { analyzer.stop() }
+        .onDisappear { analyzer.stop(); explanationTask?.cancel(); replyTask?.cancel(); replyTask = nil }
         .sheet(isPresented: $showCloudSetup) { CloudSetupView() }
         .confirmationDialog("Promote your pawn", isPresented: Binding(get: { !promotionMoves.isEmpty }, set: { if !$0 { promotionMoves = [] } })) {
             ForEach(promotionMoves, id: \.uci) { move in Button(move.promotion?.rawValue.capitalized ?? "Queen") { play(move); promotionMoves = [] } }
@@ -321,12 +387,44 @@ struct GameDetailView: View {
         .sheet(isPresented: $showEngineSettings) { NavigationStack { EngineSettingsView().toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Done") { showEngineSettings = false } } } } }
     }
 
+    private func explainSelectedMove(_ replay: GameReplay) {
+        guard let move = replay.variationMoves.last else { return }
+        let before = replay.variationPositions.dropLast().last ?? replay.positions[replay.index]
+        let history = Array(replay.repetitionHistory.dropLast())
+        let ticket = UUID(); explanationRequest = ticket; explainingMove = true
+        explanationTask?.cancel()
+        explanationTask = Task {
+            do {
+                let evaluation = try await analyzer.evaluateAttempt(move: move, position: before, history: history,
+                                                                   configuration: model.effectiveEngineConfiguration)
+                guard !Task.isCancelled, explanationRequest == ticket else { return }
+                moveExplanation = ReviewMoveAcceptance.explanation(move: move, position: before, evaluation: evaluation)
+            } catch {
+                guard !Task.isCancelled, explanationRequest == ticket else { return }
+                moveExplanation = "This move could not be verified. Your line remains available. " + error.localizedDescription
+            }
+            if explanationRequest == ticket { explainingMove = false }
+        }
+    }
+
     private func selectMoment(_ index: Int) {
         guard !moments.isEmpty else { return }
         momentIndex = min(max(0, index), moments.count - 1)
         let finding = moments[momentIndex]
         // A finding describes the position before the player's decision.
         if let index = replay?.positions.firstIndex(where: { $0.fen == finding.positionFEN }) { navigate(index) }
+    }
+    private func scheduleReply() {
+        guard engineReplies, replyTask == nil, !analyzer.isCalculating, let replay,
+              replay.position.sideToMove != game.playerSide,
+              replay.position.outcome() == .ongoing,
+              let reply = analyzer.evaluation(for: replay.position)?.best?.move else { return }
+        let fen = replay.position.fen
+        replyTask = Task {
+            try? await Task.sleep(for: .milliseconds(250))
+            guard !Task.isCancelled, engineReplies, self.replay?.position.fen == fen else { return }
+            play(reply); replyTask = nil
+        }
     }
     private func navigate(_ index: Int) { replay?.navigate(to: index); selected = nil; variationAssessment = nil }
     private func rebuildClockTimeline() {
@@ -374,106 +472,18 @@ struct GameDetailView: View {
 struct ReviewCardView: View {
     let finding: MoveFinding
     @EnvironmentObject private var model: AppModel
-    @Environment(\.dismiss) private var dismiss
-    @Environment(\.scenePhase) private var scenePhase
-    @State private var analyzer = PositionAnalysisController()
-    @State private var position: ChessPosition
-    @State private var history: [ChessPosition] = []
-    @State private var selected: Int?
-    @State private var promotions: [ChessMove] = []
-    @State private var gameHistory: MoveHistory?
-    @State private var moveHistoryCache: MoveHistory?
-    @State private var playedMoves: [ChessMove] = []
-    @State private var browsingPly: Int?
-    private let initial: ChessPosition
-    init(finding: MoveFinding) {
-        self.finding = finding
-        let initial = (try? ChessPosition(fen: finding.positionFEN)) ?? .initial
-        self.initial = initial
-        _position = State(initialValue: initial)
-    }
-    private var targets: Set<Int> { Set(position.legalMoves().filter { $0.from == selected }.map(\.to)) }
-    private var moveHistory: MoveHistory {
-        moveHistoryCache ?? MoveHistory(position: initial)
-    }
-    private var shownPosition: ChessPosition {
-        if let browsingPly, moveHistory.positions.indices.contains(browsingPly) { return moveHistory.positions[browsingPly] }
-        return position
-    }
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
-                Eyebrow(text: model.isDemo ? "Sample review card" : "\(finding.source.capitalized) finding")
-                Text(finding.theme).font(ChessMeStyle.title(32))
-                HStack {
-                    Text("Your move: \((try? initial.san(ChessMove(uci: finding.playedMove))) ?? finding.playedMove)").font(.subheadline)
-                    Spacer()
-                    MoveQualityBadge(quality: finding.estimatedQuality)
-                    FavoriteButton(selected: model.isFavorite(finding)) { model.toggleFavorite(finding) }
-                }
-                LiveAnalysis(controller: analyzer, position: shownPosition) { evaluation in
-                AnalysisBoardView(position: shownPosition, perspective: initial.sideToMove, selectedSquare: selected, targets: browsingPly == nil ? targets : [],
-                                  moveMarker: browsingPly == nil && position == initial ? (try? ChessMove(uci: finding.playedMove)).map { BoardMoveMarker(square: $0.to, quality: finding.estimatedQuality) } : nil,
-                                  evaluation: evaluation, topMoves: model.effectiveEngineConfiguration.topMoves,
-                                  fallbackMove: browsingPly == nil && position == initial ? finding.bestMove : nil, onSquare: browsingPly == nil ? choose : nil)
-                }
-                MoveHistoryView(history: moveHistory, selectedIndex: browsingPly ?? moveHistory.moves.count, prefix: "card") { index in
-                    selected = nil; browsingPly = index == moveHistory.moves.count ? nil : index
-                }
-                if browsingPly != nil { Button("Return to review moment") { browsingPly = nil } }
-                AnalysisPanel(position: shownPosition, controller: analyzer, configuration: model.effectiveEngineConfiguration)
-                HStack {
-                    Button("Undo") { if let previous = history.popLast() { position = previous; selected = nil; playedMoves.removeLast(); browsingPly = nil } }.disabled(history.isEmpty)
-                    Spacer()
-                    Button("Reset") { position = initial; history = []; playedMoves = []; selected = nil; browsingPly = nil }
-                }
-                Text(finding.explanation).font(.subheadline).lineSpacing(3)
-                PrimaryButton(title: "Play saved suggestion", symbol: "arrow.right") {
-                    position = initial; history = []; playedMoves = []; browsingPly = nil
-                    if let move = try? ChessMove(uci: finding.bestMove) { play(move) }
-                }
-                Text("Explore the alternatives. This finding has insufficient evidence for a single-answer puzzle. Live lines use the device engine.")
-                    .font(.caption).foregroundStyle(ChessMeStyle.muted)
-            }.padding(22)
-        }.background(ChessMeStyle.paper)
-            .navigationTitle("Review moment").navigationBarTitleDisplayMode(.inline).toolbar(.visible, for: .navigationBar)
-            .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Done") { dismiss() } } }
-            .task {
-                let savedFinding = finding
-                let game = model.library.games.first { $0.id == savedFinding.gameID }
-                let work = Task.detached(priority: .userInitiated) { try MoveHistory(game: game, finding: savedFinding) }
-                gameHistory = try? await withTaskCancellationHandler(operation: { try await work.value }, onCancel: { work.cancel() })
-                guard !Task.isCancelled else { return }
-                rebuildMoveHistory()
-                updateAnalysis()
-            }
-            .onChange(of: playedMoves) { _, _ in rebuildMoveHistory() }
-            .onChange(of: browsingPly) { _, _ in updateAnalysis() }
-            .onChange(of: position) { _, _ in updateAnalysis() }
-            .onChange(of: model.engineConfiguration) { _, _ in updateAnalysis() }
-            .onChange(of: scenePhase) { _, phase in if phase == .active { updateAnalysis() } else { analyzer.stop() } }
-            .onDisappear { analyzer.stop() }
-            .confirmationDialog("Promote your pawn", isPresented: Binding(get: { !promotions.isEmpty }, set: { if !$0 { promotions = [] } })) {
-                ForEach(promotions, id: \.uci) { move in Button(move.promotion?.rawValue.capitalized ?? "Queen") { play(move); promotions = [] } }
-            }
-    }
-    private func rebuildMoveHistory() {
-        let base = gameHistory ?? MoveHistory(position: initial)
-        moveHistoryCache = (try? base.appending(playedMoves)) ?? base
-    }
-    private func updateAnalysis() {
-        let index = browsingPly ?? moveHistory.moves.count
-        analyzer.start(position: shownPosition, history: moveHistory.positions.prefix(index).map(\.repetitionKey), configuration: model.effectiveEngineConfiguration)
-    }
-    private func choose(_ square: Int) {
-        if selected == square { selected = nil; return }
-        let moves = position.legalMoves().filter { $0.from == selected && $0.to == square }
-        if moves.count > 1 { promotions = moves; return }
-        if let move = moves.first { play(move); return }
-        selected = position.squares[square]?.side == position.sideToMove ? square : nil
-    }
-    private func play(_ move: ChessMove) {
-        guard let next = try? position.applying(move) else { return }
-        history.append(position); playedMoves.append(move); position = next; selected = nil
+        if let game = model.library.games.first(where: { $0.id == finding.gameID }) {
+            GameDetailView(game: game, initialMomentID: finding.id)
+        } else {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 18) {
+                    Text(finding.theme).font(ChessMeStyle.title(26))
+                    Text(finding.explanation).font(.subheadline)
+                    ReviewLineView(fen: finding.positionFEN, moves: finding.continuation)
+                    Text("Retained position. The source game is unavailable on this device.").font(.caption)
+                }.padding(22)
+            }.background(ChessMeStyle.paper).navigationTitle("Saved position")
+        }
     }
 }

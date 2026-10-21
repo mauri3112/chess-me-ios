@@ -25,9 +25,7 @@ extension AppModel {
         return (library.puzzleRecommendations ?? []).sorted { $0.matchedAt > $1.matchedAt }.flatMap(\.matches).map(\.puzzle).filter { seen.insert($0.id).inserted }
     }
     var nextRecommendedPuzzle: TrainingPuzzle? {
-        recommendedPuzzles.first { puzzle in
-            (library.practice.first { $0.findingID == "lichess-puzzle-\(puzzle.id)" }?.dueAt ?? .distantPast) <= Date()
-        } ?? recommendedPuzzles.first
+        recommendedPuzzles.first { !hasSeenReviewPuzzle($0) } ?? recommendedPuzzles.first
     }
     var puzzleFocus: [(theme: String, weight: Double)] {
         var weights: [String: Double] = [:]
@@ -44,7 +42,11 @@ extension AppModel {
     }
     var puzzleMatchCoverage: (checked: Int, total: Int) {
         let ids = Set(library.games.filter { $0.isFinished && !$0.id.hasPrefix("demo-") }.map(\.id))
-        let eligible = library.analyses.filter { $0.isComplete && !$0.findings.isEmpty && ids.contains($0.gameID) }
+        let games = Dictionary(library.games.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        let eligible = library.analyses.filter { review in
+            guard review.isComplete, ids.contains(review.gameID), let game = games[review.gameID] else { return false }
+            return !reviewJourney(for: game).moments.isEmpty
+        }
         let checked = eligible.filter { analysis in
             library.puzzleRecommendations?.contains { $0.gameID == analysis.gameID && $0.analysisSignature == Self.analysisSignature(analysis) && abs($0.rating - puzzleTargetRating) < 100 } == true
         }.count
@@ -123,12 +125,14 @@ extension AppModel {
         var refreshed = 0
         for game in games {
             guard !Task.isCancelled, generation == puzzleMatchGeneration else { return }
-            guard game.isFinished, !game.id.hasPrefix("demo-"), let analysis = library.analyses.first(where: { $0.gameID == game.id }), analysis.isComplete, !analysis.findings.isEmpty else { continue }
+            guard game.isFinished, !game.id.hasPrefix("demo-"), let analysis = library.analyses.first(where: { $0.gameID == game.id }), analysis.isComplete else { continue }
+            let teaching = reviewJourney(for: game).moments.map(\.finding)
+            guard !teaching.isEmpty else { continue }
             let signature = Self.analysisSignature(analysis)
             if !force && library.puzzleRecommendations?.contains(where: { $0.gameID == game.id && $0.analysisSignature == signature && abs($0.rating - rating) < 100 }) == true { continue }
             var themes: [String: Double] = [:]
             let global = Dictionary(uniqueKeysWithValues: puzzleFocus.map { ($0.theme, $0.weight) })
-            for finding in analysis.findings {
+            for finding in teaching {
                 for theme in PuzzleTheme.related(to: finding) {
                     themes[theme, default: 0] += min(10, max(1, finding.centipawnLoss / 100)) + min(20, global[theme, default: 0] / 5)
                 }

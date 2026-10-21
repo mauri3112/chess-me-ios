@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 import Foundation
+#if canImport(CStockfish)
 import CStockfish
+#endif
 #if os(iOS)
 import os
 #endif
@@ -9,10 +11,21 @@ public enum StockfishEngine {
     public static let version = "stockfish-19-1a298aa575a0-chessme-v1"
     public static let sourceURL = URL(string: "https://github.com/official-stockfish/Stockfish/tree/edb0d9db6731067ec50ce619ff372b463bc4dd5d")!
     public static var license: String {
-        guard let url = Bundle.module.url(forResource: "StockfishLicense", withExtension: "txt", subdirectory: "Resources") else { return "" }
+        guard let url = CoreResources.url(forResource: "StockfishLicense", withExtension: "txt", subdirectory: "Resources") else { return "" }
         return (try? String(contentsOf: url, encoding: .utf8)) ?? ""
     }
-    public static func trimMemory() { chessme_stockfish_trim_memory() }
+    public static var isAvailable: Bool {
+        #if canImport(CStockfish)
+        return true
+        #else
+        return false
+        #endif
+    }
+    public static func trimMemory() {
+        #if canImport(CStockfish)
+        chessme_stockfish_trim_memory()
+        #endif
+    }
     /// Advisory app headroom, queried afresh before each search. Physical device
     /// RAM is not the amount iOS lets this process allocate.
     public static var availableMemoryMegabytes: Int? {
@@ -27,9 +40,10 @@ public enum StockfishEngine {
 }
 
 enum StockfishError: LocalizedError {
-    case missingNetwork, invalidPosition, invalidHistory, noCompletedSearch, failed
+    case unavailable, missingNetwork, invalidPosition, invalidHistory, noCompletedSearch, failed
     var errorDescription: String? {
         switch self {
+        case .unavailable: return "Stockfish is not bundled in the native app. Use device Arasan or an eligible cloud review."
         case .missingNetwork: return "Stockfish's bundled network could not be loaded."
         case .invalidPosition: return "Stockfish could not read this position."
         case .invalidHistory: return "The position history could not be reconstructed safely."
@@ -99,6 +113,7 @@ struct StockfishAnalyzer {
 
     func evaluate(position: ChessPosition, repetitionHistory: [String], requiredMove: ChessMove?,
                   cancellation: @escaping () -> Bool, update: @escaping (PositionEvaluation) -> Void) throws -> PositionEvaluation {
+        #if canImport(CStockfish)
         if cancellation() { throw ChessError.cancelled }
         guard position.outcome(repetitionCount: repetitionHistory.filter { $0 == position.repetitionKey }.count + 1) == .ongoing else {
             return PositionEvaluation(moves: [], completedDepth: 0, nodes: 0)
@@ -113,7 +128,7 @@ struct StockfishAnalyzer {
                                                                    availableToAppMB: StockfishEngine.availableMemoryMegabytes) else {
             throw LocalAnalysisResourceError.insufficientMemory
         }
-        guard let network = Bundle.module.url(forResource: "nn-1a298aa575a0", withExtension: "nnue", subdirectory: "Resources") else {
+        guard let network = CoreResources.url(forResource: "nn-1a298aa575a0", withExtension: "nnue", subdirectory: "Resources") ?? Self.hostNetwork else {
             throw StockfishError.missingNetwork
         }
         let root = try Self.nativePosition(position, history: repetitionHistory)
@@ -141,5 +156,17 @@ struct StockfishAnalyzer {
         case 4: throw StockfishError.noCompletedSearch
         default: throw StockfishError.failed
         }
+        #else
+        throw StockfishError.unavailable
+        #endif
+    }
+
+    private static var hostNetwork: URL? {
+        #if os(iOS)
+        return nil
+        #else
+        let url = URL(fileURLWithPath: #filePath).deletingLastPathComponent().appendingPathComponent("Resources/nn-1a298aa575a0.nnue")
+        return FileManager.default.fileExists(atPath: url.path) ? url : nil
+        #endif
     }
 }

@@ -42,6 +42,7 @@ struct LibrarySnapshot: Codable {
     var cloudBatch: CloudBatchRecord?
     var localAnalysisJobs: [LocalAnalysisJob]?
     var localAnalysisTimings: [LocalAnalysisTiming]?
+    var review: ReviewLibrary?
 }
 
 final class LocalLibrary {

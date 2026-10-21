@@ -90,6 +90,9 @@ final class AppModel: ObservableObject {
     @Published var cloudEngineConfiguration = CloudEngineConfiguration.saved() {
         didSet { cloudEngineConfiguration.save() }
     }
+    var reviewGeneration = UUID()
+    var reviewJourneyCache: [String: ReviewJourney] = [:]
+    @Published var reviewSaveError: String?
     @Published var notice: String?
     @Published private(set) var isImporting = false
     @Published private(set) var isAnalyzing = false
@@ -143,12 +146,12 @@ final class AppModel: ObservableObject {
     }
     func deepConfiguration(_ level: LocalAnalysisLevel) -> DeviceEngineConfiguration {
         var configuration = DeviceEngineConfiguration()
-        configuration.engine = .stockfish
+        configuration.engine = .arasan
         configuration.depth = level.depth
         configuration.secondsPerPosition = level.secondsPerDecision
         configuration.memoryMB = DeviceAnalysisCoordinator.hardware.cacheMegabytes(for: level)
         configuration.searchNodeLimit = level.nodeLimit
-        configuration.engineThreads = DeviceAnalysisCoordinator.hardware.engineThreads
+        configuration.engineThreads = 1
         return configuration
     }
     func nightEstimate(_ level: LocalAnalysisLevel) -> LocalAnalysisNightEstimate {
@@ -163,7 +166,7 @@ final class AppModel: ObservableObject {
         let decisions = counts.isEmpty ? 40 : counts.reduce(0, +) / Double(counts.count)
         return LocalAnalysisNightEstimate(configuration: deepConfiguration(level), typicalDecisions: decisions,
                                           hardwareIdentifier: DeviceAnalysisCoordinator.hardware.modelIdentifier,
-                                          engineVersion: StockfishEngine.version, timings: library.localAnalysisTimings ?? [])
+                                          engineVersion: ArasanEngine.version, timings: library.localAnalysisTimings ?? [])
     }
     func recordLocalAnalysisTiming(_ timing: LocalAnalysisTiming) {
         guard !isDemo else { return }
@@ -177,7 +180,7 @@ final class AppModel: ObservableObject {
         guard !isImporting, !cloudIsRunning, let game = windowGames.first(where: { $0.id == gameID }) else { return }
         guard selectedWindow == .day || subscriptions.isPro else { showPaywall = true; return }
         let level = DeviceAnalysisCoordinator.hardware.bounded(overnightSettings.level)
-        if let job = localAnalysisJob(for: gameID), job.state != .completed {
+        if let job = localAnalysisJob(for: gameID), job.state != .completed, DeviceEngine.available.contains(job.configuration.engine) {
             deviceAnalysis.enqueue(games: [game], configuration: job.configuration, level: job.level, requiresPro: selectedWindow != .day, scheduledByUser: true)
         } else {
             deviceAnalysis.enqueue(games: [game], configuration: deepConfiguration(level), level: level, requiresPro: selectedWindow != .day, scheduledByUser: true)
@@ -212,6 +215,7 @@ final class AppModel: ObservableObject {
         let jobs = (library.localAnalysisJobs ?? []).filter {
             $0.gameID == gameID && $0.configuration.covers(configuration) &&
             $0.checkpoint?.source == "device" && $0.checkpoint?.gameID == gameID &&
+            $0.checkpoint?.configurationID == $0.configuration.options.configurationID &&
             $0.checkpoint?.isComplete == true && $0.checkpoint?.engineVersion == version
         }.sorted {
             if $0.configuration.depth != $1.configuration.depth { return $0.configuration.depth > $1.configuration.depth }
@@ -326,15 +330,10 @@ final class AppModel: ObservableObject {
                 if let encoded = try? JSONEncoder().encode(configuration) { UserDefaults.standard.set(encoded, forKey: "analysis.device.configuration") }
             }
         }
-        if !UserDefaults.standard.bool(forKey: "analysis.stockfishMigration") {
-            UserDefaults.standard.set(true, forKey: "analysis.stockfishMigration")
-            if configuration.engine == .arasan && configuration.depth == 21 && configuration.secondsPerPosition == 3 {
-                configuration.engine = .stockfish
-                if let encoded = try? JSONEncoder().encode(configuration) { UserDefaults.standard.set(encoded, forKey: "analysis.device.configuration") }
-            }
-        }
-        if configuration.engine != .stockfish {
-            configuration.engine = .stockfish
+        // Native builds deliberately do not link Stockfish. Preserve saved review
+        // provenance, but migrate future device requests to the available engine.
+        if configuration.engine == .stockfish {
+            configuration.engine = .arasan
             if let encoded = try? JSONEncoder().encode(configuration) { UserDefaults.standard.set(encoded, forKey: "analysis.device.configuration") }
         }
         return configuration
@@ -467,6 +466,7 @@ final class AppModel: ObservableObject {
 
     func loadDemo() {
         guard !isBusy else { return }
+        reviewGeneration = UUID(); reviewJourneyCache.removeAll(); endSession()
         cancelPuzzleMatches()
         if !library.isDemo { libraryBeforeDemo = library }
         library = LibrarySnapshot(games: DemoContent.games(now: Date()), isDemo: true)
@@ -482,6 +482,7 @@ final class AppModel: ObservableObject {
 
     func exitDemo() {
         guard !isBusy else { return }
+        reviewGeneration = UUID(); reviewJourneyCache.removeAll(); endSession()
         cancelPuzzleMatches()
         library = libraryBeforeDemo ?? LibrarySnapshot()
         libraryBeforeDemo = nil
@@ -615,45 +616,45 @@ final class AppModel: ObservableObject {
     }
 
     func startSession(allSaved: Bool = false, theme: String? = nil) {
+        changeReview { $0.standalonePractice = nil }
         sessionTab = selectedTab
-        let due = allSaved ? allDuePuzzles : duePuzzles
-        let candidates = due.isEmpty ? (allSaved ? allPuzzles : puzzles) : due
-        let groups = Dictionary(grouping: candidates, by: \.theme)
-        let focus = theme ?? groups.keys.sorted { (groups[$0]?.count ?? 0) > (groups[$1]?.count ?? 0) }.first
-        let pool = candidates.sorted {
-            if ($0.theme == focus) != ($1.theme == focus) { return $0.theme == focus }
-            if $0.centipawnLoss != $1.centipawnLoss { return $0.centipawnLoss > $1.centipawnLoss }
-            return $0.id < $1.id
-        }
-        var perGame: [String: Int] = [:]
-        session = Array(pool.filter { finding in
-            guard perGame[finding.gameID, default: 0] < 2 else { return false }
-            perGame[finding.gameID, default: 0] += 1
-            return true
-        }.prefix(6))
-        sessionIndex = 0
-        sessionFinished = false
-        sessionOutcomes = [:]
+        let targets = suggestedReviewTargets
+        session = targets.map(\.finding)
+        if isDemo && session.isEmpty { session = Array(allPuzzles.prefix(ReviewLibrary.sessionSize)) }
+        sessionIndex = 0; sessionFinished = false; sessionOutcomes = [:]
+        changeReview { $0.session = ReviewFollowUpSession(targetIDs: session.map(\.id), findings: session) }
         activeLesson = session.first
     }
 
     func openLesson(_ finding: MoveFinding) {
+        changeReview { $0.standalonePractice = nil }
         sessionTab = selectedTab
-        let following = allPuzzles.filter { $0.id != finding.id }.sorted {
-            if ($0.theme == finding.theme) != ($1.theme == finding.theme) { return $0.theme == finding.theme }
-            return $0.centipawnLoss > $1.centipawnLoss
-        }
-        session = [finding] + Array(following.prefix(5))
-        sessionIndex = 0
-        sessionFinished = false
-        sessionOutcomes = [:]
+        _ = target(for: finding)
+        session = [finding]
+        sessionIndex = 0; sessionFinished = false; sessionOutcomes = [:]
+        changeReview { $0.session = ReviewFollowUpSession(targetIDs: [finding.id], findings: [finding]) }
         activeLesson = finding
+    }
+
+    func resumeReviewSession() {
+        if let pending = reviewState.standalonePractice, let run = reviewState.runs.first(where: { $0.id == pending.runID }) {
+            session = [run.sourceFinding]; sessionTab = selectedTab; activeLesson = run.sourceFinding; return
+        }
+        guard let saved = reviewState.session, saved.canResume else { return }
+        session = saved.findings ?? saved.targetIDs.compactMap { id in reviewState.targets.first { $0.id == id }?.finding }
+        sessionTab = selectedTab; sessionIndex = min(saved.index, max(0, session.count - 1))
+        sessionFinished = false; sessionOutcomes = [:]; activeLesson = session.first
+    }
+
+    func recordReviewSessionOutcome(_ finding: MoveFinding, summary: String) {
+        sessionOutcomes[finding.id] = summary
     }
 
     func advanceSession() {
         guard sessionIndex + 1 < session.count else { sessionFinished = true; return }
         sessionIndex += 1
         activeLesson = session[sessionIndex]
+        changeReview { $0.session?.index = sessionIndex }
     }
 
     func previousSessionPosition() {
@@ -677,12 +678,16 @@ final class AppModel: ObservableObject {
         }
         library.analyses.removeAll { $0.gameID == analysis.gameID }
         library.analyses.append(analysis)
+        if let game = library.games.first(where: { $0.id == analysis.gameID }), library.review != nil {
+            reconcileReview(game: game, journey: ReviewJourney(game: game, analysis: analysis))
+        }
         if analysis.isComplete { schedulePuzzleMatches() }
     }
 
     func deleteLocalData() {
         guard !isBusy else { notice = "Pause analysis before deleting your library."; return }
         defer { openingLines.removeAll(); openingReviews.removeAll(); gameOutcomes.removeAll() }
+        reviewGeneration = UUID(); reviewJourneyCache.removeAll()
         deviceAnalysis.clear()
         cancelPuzzleMatches(); endSession(); resetCloudAccess()
         syncMessage = nil
@@ -704,7 +709,9 @@ final class AppModel: ObservableObject {
         let ids = Set(library.games.filter { $0.username.lowercased() == username.lowercased() }.map(\.id))
         let relatedAnalyses = library.analyses + (library.analysisHistory ?? [])
         let findingIDs = Set(relatedAnalyses.filter { ids.contains($0.gameID) }.flatMap(\.findings).map(\.id))
+        reviewGeneration = UUID(); reviewJourneyCache.removeAll()
         cancelPuzzleMatches(); endSession()
+        library.review?.removeAccount(username, gameIDs: ids)
         library.favoriteGameIDs?.removeAll { ids.contains($0) }
         library.favoriteFindings?.removeAll { ids.contains($0.gameID) }
         let puzzleIDs = Set((library.puzzleRecommendations ?? []).filter { ids.contains($0.gameID) }.flatMap(\.matches).map { $0.puzzle.id })
@@ -759,8 +766,8 @@ final class AppModel: ObservableObject {
         guard let started = formatter.date(from: dateString) else { throw ImportFailure.missingDate }
         guard selectedWindow.contains(started, now: Date()) else { throw ImportFailure.outsideWindow }
         let id = "pgn-" + SHA256.hash(data: Data(text.utf8)).map { String(format: "%02x", $0) }.joined()
-        let game = ChessGame(id: id, username: name, white: white, black: black, playedAt: started, playerSide: side, moves: document.moves.joined(separator: " "), pgn: text, initialFEN: document.initialFEN, status: result == "1/2-1/2" ? "draw" : "resign", clockData: document.clockData, result: GameResult(rawValue: result))
-        if library.isDemo { library = libraryBeforeDemo ?? LibrarySnapshot(); libraryBeforeDemo = nil }
+        let game = ChessGame(id: id, username: name, white: white, black: black, playedAt: started, playerSide: side, moves: document.moves.joined(separator: " "), pgn: text, initialFEN: document.initialFEN, status: result == "1/2-1/2" ? "draw" : "resign", clockData: document.clockData, result: GameResult(rawValue: result), timestampIsExact: document.headers["UTCDate"] != nil && document.headers["UTCTime"] != nil)
+        if library.isDemo { reviewGeneration = UUID(); reviewJourneyCache.removeAll(); endSession(); library = libraryBeforeDemo ?? LibrarySnapshot(); libraryBeforeDemo = nil }
         library.games.removeAll { $0.id == id }
         library.games.append(game)
         library.importedAt = Date()
@@ -789,7 +796,7 @@ final class AppModel: ObservableObject {
 
     private func mergeImported(_ games: [ChessGame]) {
         guard !games.isEmpty else { return }
-        if library.isDemo { library = libraryBeforeDemo ?? LibrarySnapshot(); libraryBeforeDemo = nil }
+        if library.isDemo { reviewGeneration = UUID(); reviewJourneyCache.removeAll(); endSession(); library = libraryBeforeDemo ?? LibrarySnapshot(); libraryBeforeDemo = nil }
         var merged = Dictionary(uniqueKeysWithValues: library.games.map { ($0.id, $0) })
         for incoming in games {
             let game = incoming.result == nil && merged[incoming.id]?.hasSameMainline(as: incoming) == true

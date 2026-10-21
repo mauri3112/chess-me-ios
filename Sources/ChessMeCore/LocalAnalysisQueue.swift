@@ -165,7 +165,7 @@ public struct LocalAnalysisJob: Codable, Identifiable, Sendable {
     /// Continue that job with its saved configuration and search identity.
     public func matches(configuration requested: DeviceEngineConfiguration, level requestedLevel: LocalAnalysisLevel?) -> Bool {
         if configuration == requested { return true }
-        guard level != nil, level == requestedLevel, configuration.engine == .stockfish else { return false }
+        guard level != nil, level == requestedLevel, configuration.engine.isNeural else { return false }
         var ignoringCache = configuration
         ignoringCache.memoryMB = requested.memoryMB
         return ignoringCache == requested

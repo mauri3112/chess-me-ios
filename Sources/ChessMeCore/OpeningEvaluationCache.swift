@@ -21,7 +21,7 @@ public struct OpeningEvaluationCache: Sendable {
             self.schema = schema; self.engineVersion = engineVersion; self.entries = entries
         }
     }
-    public static let shared = OpeningEvaluationCache(data: Bundle.module.url(forResource: "OpeningEvaluations", withExtension: "json", subdirectory: "Resources").flatMap { try? Data(contentsOf: $0) })
+    public static let shared = OpeningEvaluationCache(data: CoreResources.url(forResource: "OpeningEvaluations", withExtension: "json", subdirectory: "Resources").flatMap { try? Data(contentsOf: $0) })
     private let entries: [String: Entry]
     public var count: Int { entries.count }
     public init(data: Data?) {

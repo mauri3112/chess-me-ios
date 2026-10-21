@@ -17,7 +17,7 @@ final class ReviewPresentationTests: XCTestCase {
     private func completeJob(game: ChessGame, configuration: DeviceEngineConfiguration) throws -> LocalAnalysisJob {
         let analysis = try LocalAnalyzer(options: AnalysisOptions(maximumDepth: 1)).analyze(game: game)
         let review = GameAnalysis(gameID: game.id, findings: analysis.findings, analyzedPlies: analysis.analyzedPlies,
-            totalPlies: analysis.totalPlies, engineVersion: StockfishEngine.version,
+            totalPlies: analysis.totalPlies, engineVersion: ArasanEngine.version,
             configurationID: configuration.options.configurationID, moveAssessments: analysis.moveAssessments)
         var job = LocalAnalysisJob(gameID: game.id, configuration: configuration, level: .balanced, nightOnly: true)
         job.checkpoint = review; job.state = .completed
@@ -132,7 +132,7 @@ final class ReviewPresentationTests: XCTestCase {
                         moveNumber: replay.positions[value.ply].fullmoveNumber, source: source)
         }
         return GameAnalysis(gameID: game.id, findings: findings, analyzedPlies: 2, totalPlies: 2, source: source,
-                            engineVersion: StockfishEngine.version, configurationID: configuration.options.configurationID, moveAssessments: assessments)
+                            engineVersion: ArasanEngine.version, configurationID: configuration.options.configurationID, moveAssessments: assessments)
     }
 
     @MainActor

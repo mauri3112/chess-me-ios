@@ -29,6 +29,10 @@ struct LibraryView: View {
             LazyVStack(alignment: .leading, spacing: 20) {
                 BrandHeader(title: "Games", tab: .games)
                 SampleNotice()
+                NavigationLink { SavedReviewLinesView() } label: {
+                    Label("Saved lines", systemImage: "arrow.triangle.branch")
+                        .font(.subheadline.weight(.semibold)).frame(minHeight: 44)
+                }.accessibilityIdentifier("games.savedLines")
                 HStack {
                     Menu {
                         Button("Queue for night analysis", systemImage: "moon.fill") { schedule = .night }

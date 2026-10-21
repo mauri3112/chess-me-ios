@@ -140,7 +140,7 @@ int chessme_arasan_analyze(const char *network, const char *fen, const char *his
             if (IsNull(required) || !legalMove(board, required)) return 3;
         }
         globals::options.search.ncpus = 1;
-        globals::options.search.hash_table_size = size_t(std::clamp(hash_mb, 1, 64)) * 1024 * 1024;
+        globals::options.search.hash_table_size = size_t(std::clamp(hash_mb, 1, 128)) * 1024 * 1024;
         globals::options.search.can_resign = false;
         globals::options.search.ponder = false;
         globals::options.book.book_enabled = false;
@@ -148,7 +148,7 @@ int chessme_arasan_analyze(const char *network, const char *fen, const char *his
         globals::options.learning.position_learning = false;
         const int targetDepth = std::clamp(depth, 1, 32);
         const auto began = Clock::now();
-        const auto deadline = began + std::chrono::milliseconds(std::clamp(milliseconds, 10, 30000));
+        const auto deadline = began + std::chrono::milliseconds(std::clamp(milliseconds, 10, 300000));
         auto lastUpdate = began - std::chrono::seconds(2);
         Snapshot best;
         uint64_t totalNodes = 0;

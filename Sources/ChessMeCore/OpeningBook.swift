@@ -81,7 +81,7 @@ public struct OpeningBook: Sendable {
     public static let shared = OpeningBook()
     private let index: Index?
     private init() {
-        let url = Bundle.module.url(forResource: "OpeningBook", withExtension: "json", subdirectory: "Resources")
+        let url = CoreResources.url(forResource: "OpeningBook", withExtension: "json", subdirectory: "Resources")
         index = url.flatMap { try? Data(contentsOf: $0) }.flatMap { try? JSONDecoder().decode(Index.self, from: $0) }
     }
     public var openingCount: Int { index?.openingCount ?? 0 }
@@ -118,7 +118,7 @@ public struct OpeningBook: Sendable {
     }
 
     public static func licenseText() throws -> String {
-        guard let url = Bundle.module.url(forResource: "LichessOpeningsLicense", withExtension: "txt", subdirectory: "Resources") else {
+        guard let url = CoreResources.url(forResource: "LichessOpeningsLicense", withExtension: "txt", subdirectory: "Resources") else {
             throw CocoaError(.fileNoSuchFile)
         }
         return try String(contentsOf: url, encoding: .utf8)

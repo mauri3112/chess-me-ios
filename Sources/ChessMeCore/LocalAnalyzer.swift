@@ -20,15 +20,15 @@ public struct AnalysisOptions: Sendable {
         self.maximumPositions = max(1, maximumPositions)
         self.minimumLoss = max(50, minimumLoss)
         self.alternativeTolerance = max(0, alternativeTolerance)
-        self.memoryMegabytes = min(engine == .stockfish ? 256 : 64, max(1, memoryMegabytes))
-        self.timeLimitSeconds = timeLimitSeconds.map { min(engine == .stockfish ? 300 : 30, max(0.01, $0)) }
+        self.memoryMegabytes = min(engine.isNeural ? 256 : 64, max(1, memoryMegabytes))
+        self.timeLimitSeconds = timeLimitSeconds.map { min(engine.isNeural ? 300 : 30, max(0.01, $0)) }
         self.searchNodeLimit = searchNodeLimit.map { min(250_000_000, max(128, $0)) }
-        self.engineThreads = min(2, max(1, engineThreads))
+        self.engineThreads = engine == .arasan ? 1 : min(2, max(1, engineThreads))
         self.engine = engine
     }
 
     public var configurationID: String {
-        "\(engine.rawValue)-d\(maximumDepth)-n\(nodesPerMove)-m\(memoryMegabytes)-t\(timeLimitSeconds ?? 0)-l\(minimumLoss)-a\(alternativeTolerance)" + (engine == .stockfish ? "-total\(searchNodeLimit ?? 0)-threads\(engineThreads)" : "")
+        "\(engine.rawValue)-d\(maximumDepth)-n\(nodesPerMove)-m\(memoryMegabytes)-t\(timeLimitSeconds ?? 0)-l\(minimumLoss)-a\(alternativeTolerance)" + (engine.isNeural ? "-total\(searchNodeLimit ?? 0)-threads\(engineThreads)" : "")
     }
 }
 
@@ -48,6 +48,10 @@ public struct PositionEvaluation: Codable, Sendable {
     public var elapsedSeconds: Double? = nil
     public var limit: String? = nil
     public var best: MoveEvaluation? { moves.first }
+    public init(moves: [MoveEvaluation], completedDepth: Int, nodes: Int, elapsedSeconds: Double? = nil, limit: String? = nil) {
+        self.moves = moves; self.completedDepth = completedDepth; self.nodes = nodes
+        self.elapsedSeconds = elapsedSeconds; self.limit = limit
+    }
 }
 
 /// Device analysis using bundled Stockfish, Arasan or the original lightweight Swift search.

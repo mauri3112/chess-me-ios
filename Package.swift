@@ -34,7 +34,7 @@ let package = Package(
                           .define("_64BIT"), .define("USE_INTRINSICS"),
                           .unsafeFlags(["-include", "ArasanPlatform.h", "-O3"]) ]
         ),
-        .target(name: "ChessMeCore", dependencies: ["CArasan", "CStockfish"], exclude: ["LICENSE"], resources: [.copy("Resources")]),
+        .target(name: "ChessMeCore", dependencies: ["CArasan", .target(name: "CStockfish", condition: .when(platforms: [.macOS, .linux]))], exclude: ["LICENSE", "Resources/nn-1a298aa575a0.nnue"], resources: [.process("Resources")]),
         .testTarget(name: "ChessMeCoreTests", dependencies: ["ChessMeCore"], exclude: ["LICENSE"])
     ],
     swiftLanguageModes: [.v5],

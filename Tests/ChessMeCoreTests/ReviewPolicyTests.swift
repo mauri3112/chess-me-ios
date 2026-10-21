@@ -66,7 +66,8 @@ struct ReviewPolicyTests {
         let data = try Data(contentsOf: root.appendingPathComponent("Sources/ChessMeCore/Resources/OpeningEvaluations.json"))
         let archive = try JSONDecoder().decode(OpeningEvaluationCache.Archive.self, from: data)
         #expect(OpeningEvaluationCache.shared.count >= 100)
-        let options = DeviceEngineConfiguration().options
+        var configuration = DeviceEngineConfiguration(); configuration.engine = .stockfish
+        let options = configuration.options
         let entry = try #require(archive.entries.first { $0.configurationID == options.configurationID })
         let board = try ChessPosition(fen: entry.positionFEN)
         let played = try #require(entry.evaluation.moves.first?.move)
@@ -81,7 +82,8 @@ struct ReviewPolicyTests {
     @Test func openingCacheRequiresExactEvidenceAndLegalLines() throws {
         let board = ChessPosition.initial
         let move = try board.move(san: "e4")
-        let options = DeviceEngineConfiguration().options
+        var configuration = DeviceEngineConfiguration(); configuration.engine = .stockfish
+        let options = configuration.options
         let result = PositionEvaluation(moves: [MoveEvaluation(move: move, score: 25, continuation: [move])], completedDepth: 21, nodes: 123)
         let entry = OpeningEvaluationCache.Entry(positionFEN: board.fen, history: [], configurationID: options.configurationID, evaluation: result)
         func cache(_ archive: OpeningEvaluationCache.Archive) throws -> OpeningEvaluationCache {

@@ -19,7 +19,7 @@ final class RefinementTests: XCTestCase {
         let game = ChessGame(id: "queue", username: "Learner", white: "Learner", black: "Opponent", playedAt: Date(), playerSide: .white, moves: "e4 e5", speed: .rapid)
         let configuration = DeviceEngineConfiguration()
         let review = GameAnalysis(gameID: game.id, findings: [], analyzedPlies: 1, totalPlies: 1,
-                                  engineVersion: StockfishEngine.version, configurationID: configuration.options.configurationID)
+                                  engineVersion: ArasanEngine.version, configurationID: configuration.options.configurationID)
         let stale = LocalAnalysisJob(gameID: game.id, configuration: configuration)
         let model = AppModel(previewLibrary: LibrarySnapshot(games: [game], analyses: [review], isDemo: true, localAnalysisJobs: [stale]))
         model.reconcileLocalAnalysisResults()
@@ -29,7 +29,7 @@ final class RefinementTests: XCTestCase {
         model.updateLibrary { $0.localAnalysisJobs?.append(LocalAnalysisJob(gameID: game.id, configuration: deeper, level: .deep)) }
         XCTAssertEqual(model.queuedAnalysisGames.map(\.id), [game.id])
         let complete = GameAnalysis(gameID: game.id, findings: [], analyzedPlies: 1, totalPlies: 1,
-                                   engineVersion: StockfishEngine.version, configurationID: deeper.options.configurationID)
+                                   engineVersion: ArasanEngine.version, configurationID: deeper.options.configurationID)
         model.updateLibrary { $0.localAnalysisJobs?[1].checkpoint = complete; $0.localAnalysisJobs?[1].state = .completed }
         model.acceptDeviceCheckpoint(complete)
         XCTAssertTrue(model.queuedAnalysisGames.isEmpty)

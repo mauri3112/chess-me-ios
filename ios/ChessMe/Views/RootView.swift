@@ -210,7 +210,7 @@ struct ReviewView: View {
                     HStack {
                         VStack(alignment: .leading, spacing: 5) {
                             Text("\(model.library.games.count) games imported").font(.subheadline.weight(.medium))
-                            Text("\(model.completedGames) reviewed in this period · \(model.allDuePuzzles.count) positions ready")
+                            Text("\(model.completedGames) reviewed in this period · \(model.readyReviewTargets.count) follow-up lessons ready")
                                 .font(.caption).foregroundStyle(ChessMeStyle.muted)
                         }
                         Spacer()
@@ -220,6 +220,19 @@ struct ReviewView: View {
                     if model.currentCloudReviews.contains(where: \.isPending) {
                         Button { model.showCloudSetup = true } label: { Label("Cloud reviews in progress", systemImage: "cloud") }
                             .accessibilityIdentifier("cloud.open")
+                    }
+                }
+                if !model.readyReviewTargets.isEmpty || model.hasResumableReview {
+                    PaperCard {
+                        VStack(alignment: .leading, spacing: 10) {
+                            Text("Follow-up practice").font(ChessMeStyle.title(22))
+                            Text("A short set from lessons you reviewed. Related puzzles stay optional.").font(.subheadline)
+                            Button(model.hasResumableReview ? "Resume practice" : "Start short practice") {
+                                if model.hasResumableReview { model.resumeReviewSession() }
+                                else { model.startSession() }
+                            }.frame(minHeight: 44).accessibilityIdentifier("today.followUp")
+                            Button("Manage lessons and view evidence") { model.selectedTab = AppTab.practice.rawValue }
+                        }
                     }
                 }
                 quickPractice
@@ -275,7 +288,7 @@ struct ReviewView: View {
                             Text(next.gameLabel).font(.caption).foregroundStyle(ChessMeStyle.muted)
                         }
                     }
-                    PrimaryButton(title: "Start practice", symbol: "play.fill") { model.startSession(allSaved: true, theme: next.theme) }
+                    PrimaryButton(title: "Practice this position", symbol: "play.fill") { model.openLesson(next) }
                         .accessibilityIdentifier("lesson.start")
                 }
             }

@@ -11,6 +11,9 @@ public enum DeviceEngine: String, Codable, CaseIterable, Identifiable, Sendable 
         case .material: return "ChessMe Material"
         }
     }
+    public static var available: [DeviceEngine] {
+        allCases.filter { $0 != .stockfish || StockfishEngine.isAvailable }
+    }
     public var maximumDepth: Int { self == .stockfish ? 64 : (self == .arasan ? 32 : 8) }
     public var isNeural: Bool { self == .stockfish || self == .arasan }
     public var detail: String {
@@ -24,7 +27,7 @@ public enum DeviceEngine: String, Codable, CaseIterable, Identifiable, Sendable 
 }
 
 public struct DeviceEngineConfiguration: Codable, Equatable, Sendable {
-    public var engine: DeviceEngine = .stockfish
+    public var engine: DeviceEngine = .arasan
     public var depth = 21
     public var nodesPerCandidate = 100_000
     public var memoryMB = 16

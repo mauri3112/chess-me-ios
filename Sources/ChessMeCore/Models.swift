@@ -81,15 +81,17 @@ public struct ChessGame: Codable, Identifiable, Equatable, Sendable {
     public let clockDataFetchedAt: Date?
     public let result: GameResult?
     public let speed: GameSpeed?
+    /// False for PGN dates whose missing time was synthesized. Nil preserves legacy decoding.
+    public let timestampIsExact: Bool?
 
     public init(id: String, username: String, white: String, black: String, playedAt: Date,
                 playerSide: Side, moves: String, pgn: String? = nil, initialFEN: String? = nil,
-                status: String = "mate", clockData: GameClockData? = nil, clockDataFetchedAt: Date? = nil, result: GameResult? = nil, speed: GameSpeed? = nil) {
+                status: String = "mate", clockData: GameClockData? = nil, clockDataFetchedAt: Date? = nil, result: GameResult? = nil, speed: GameSpeed? = nil, timestampIsExact: Bool? = nil) {
         self.id = id; self.username = username; self.white = white; self.black = black
         self.playedAt = playedAt; self.playerSide = playerSide; self.moves = moves
         self.pgn = pgn; self.initialFEN = initialFEN; self.status = status
         self.clockData = clockData; self.clockDataFetchedAt = clockDataFetchedAt
-        self.result = result; self.speed = speed
+        self.result = result; self.speed = speed; self.timestampIsExact = timestampIsExact
     }
 
     public var timeControl: GameSpeed {
@@ -128,12 +130,12 @@ public struct ChessGame: Codable, Identifiable, Equatable, Sendable {
     }
     public func withClockData(_ data: GameClockData?, fetchedAt: Date) -> ChessGame {
         ChessGame(id: id, username: username, white: white, black: black, playedAt: playedAt, playerSide: playerSide,
-                  moves: moves, pgn: pgn, initialFEN: initialFEN, status: status, clockData: data, clockDataFetchedAt: fetchedAt, result: result, speed: speed)
+                  moves: moves, pgn: pgn, initialFEN: initialFEN, status: status, clockData: data, clockDataFetchedAt: fetchedAt, result: result, speed: speed, timestampIsExact: timestampIsExact)
     }
     public func withResult(_ value: GameResult?) -> ChessGame {
         ChessGame(id: id, username: username, white: white, black: black, playedAt: playedAt, playerSide: playerSide,
                   moves: moves, pgn: pgn, initialFEN: initialFEN, status: status, clockData: clockData,
-                  clockDataFetchedAt: clockDataFetchedAt, result: value, speed: speed)
+                  clockDataFetchedAt: clockDataFetchedAt, result: value, speed: speed, timestampIsExact: timestampIsExact)
     }
 }
 

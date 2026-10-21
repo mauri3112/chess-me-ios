@@ -96,7 +96,7 @@ final class DeviceAnalysisTests: XCTestCase {
     }
 
     @MainActor
-    func testStockfishQueueWaitsForAppMemoryAndResumesTheSameDepth() async throws {
+    func testNeuralQueueWaitsForAppMemoryAndResumesTheSameDepth() async throws {
         let game = try XCTUnwrap(DemoContent.games().first)
         var configuration = DeviceEngineConfiguration()
         configuration.depth = 1; configuration.secondsPerPosition = 1; configuration.searchNodeLimit = 10_000

@@ -353,7 +353,7 @@ struct LichessGameRecord: Decodable {
                                   moves: san.joined(separator: " "), pgn: pgn, initialFEN: initialFen, status: status,
                                   clockData: clockData, clockDataFetchedAt: Date(),
                                   result: winner.map { $0 == .white ? .whiteWin : .blackWin } ?? (["draw", "stalemate"].contains(status) ? .draw : nil),
-                                  speed: speed == "ultraBullet" ? .bullet : GameSpeed(rawValue: speed)))
+                                  speed: speed == "ultraBullet" ? .bullet : GameSpeed(rawValue: speed), timestampIsExact: true))
     }
 
     static let finishedStatuses: Set<String> = ["mate", "resign", "stalemate", "timeout", "draw", "outoftime", "cheat", "noStart", "variantEnd"]

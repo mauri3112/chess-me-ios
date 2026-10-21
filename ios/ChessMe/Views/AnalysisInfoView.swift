@@ -5,18 +5,18 @@ struct AnalysisInfoView: View {
     var body: some View {
         List {
             Section("On your device") {
-                Text("Stockfish 19 and its neural network are bundled for offline analysis. Overnight Stockfish reviews save decisions and can resume while charging.")
+                Text("Arasan 26 and its neural network provide offline device analysis. Overnight reviews save completed decisions and can resume while charging.")
                 Text("Scores, move labels and brilliant candidates are estimates. More time can change the result. The evaluation bar shows an advantage in pawns, rather than a win probability.")
             }
             Section("Practice") {
-                Text("Lessons start without engine suggestions. Asking for a hint, opening analysis or exploring marks that solve as guided. Guided solves return sooner; unaided solves extend your practice streak.")
+                Text("Exercises start without engine suggestions. Hints, mistakes, retries and revealed lines remain in the attempt history. Follow-up timing adapts to that evidence. Later recall and new related-position results are shown separately.")
             }
             Section("Cloud") {
-                Text("Cloud Stockfish runs on a separately configured server. Cloud reviews require a verified subscription and remaining allowance. Live board analysis always uses Stockfish on this device.")
+                Text("Cloud Stockfish runs on a separately configured server. Cloud reviews require a verified subscription and remaining allowance. Live board analysis uses the selected device engine. Stockfish is not bundled in the native app.")
             }
             Section("Related puzzles and openings") {
                 Text("Book moves follow the offline Lichess catalogue of \(OpeningBook.shared.openingCount.formatted()) opening lines and variations. Theory ends at the recorded length of each line. Known positions also recognize transpositions. Ordinary book moves do not become mistake lessons; verified blunders remain visible.")
-                Text("Lichess puzzles come from its CC0 database. Matching uses estimated tactical themes, your puzzle level and failed attempts. Solve the whole line; asking for help keeps the attempt guided.")
+                Text("Lichess puzzles come from its CC0 database. Broad catalogue suggestions use themes and estimated level. A lesson-specific invitation additionally verifies a shared board mechanism in the legal lines. Related puzzles are optional; asking for help remains visible in the attempt history.")
                 Text("Opening advice starts after 30 sufficiently reviewed standard games. It requires repeated losses at the same position and agreement on a suggested move. These are engine estimates.")
             }
             Section("Supported games") {
@@ -36,7 +36,7 @@ struct OpenSourceLicensesView: View {
                 Text("Copyright 2026 ChessMe contributors. Licensed under GNU GPL version 3. You can use, study, modify and share this software under that licence. There is no warranty.").font(.subheadline)
                 Link("Corresponding source for this build", destination: URL(string: Bundle.main.object(forInfoDictionaryKey: "ChessMeSourceCodeURL") as? String ?? "https://github.com/mauri3112/chess-me-ios")!)
                 Text("The published client source includes the app, shared core, native engine adapters, exact neural networks and build files. The cloud backend is a separate service.").font(.footnote)
-                Text("Stockfish 19").font(ChessMeStyle.title(26))
+                Text("Stockfish · cloud and host tools").font(ChessMeStyle.title(26))
                 Text("Copyright 2004–2026 The Stockfish developers. Licensed under GNU GPLv3 or later. No warranty.").font(.subheadline)
                 Link("Stockfish upstream source", destination: StockfishEngine.sourceURL)
                 Text(StockfishEngine.license).font(.system(.footnote, design: .monospaced)).textSelection(.enabled)
