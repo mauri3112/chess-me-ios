@@ -2,6 +2,7 @@ import SwiftUI
 import StoreKit
 
 struct PaywallView: View {
+    private enum Activation { case purchased, restored }
     @EnvironmentObject private var model: AppModel
     @EnvironmentObject private var authentication: LichessAuthentication
     @EnvironmentObject private var subscriptions: SubscriptionStore
@@ -11,6 +12,8 @@ struct PaywallView: View {
     @State private var error: String?
     private var cloudAccount: CloudAccount? { model.cloudAccount }
     @State private var showPrivacy = false
+    @State private var activation: Activation?
+    @State private var awaitingApproval = false
 
     private var isStoreKitTesting: Bool {
         #if DEBUG
@@ -22,6 +25,15 @@ struct PaywallView: View {
 
     var body: some View {
         NavigationStack {
+            Group {
+            if let activation {
+                ProWelcomeView(restored: activation == .restored,
+                               continueTitle: model.requestedProWindow.map { "Use \($0.shortLabel) of history" } ?? "Continue to my games") {
+                    model.applyRequestedProWindow()
+                    if model.requestedProWindow == nil { model.selectedTab = AppTab.games.rawValue }
+                    dismiss()
+                }
+            } else {
             ScrollView {
                 VStack(alignment: .leading, spacing: 23) {
                     Eyebrow(text: "chess-me Pro")
@@ -96,7 +108,13 @@ struct PaywallView: View {
                         Text(error).font(.footnote).foregroundStyle(ChessMeStyle.muted)
                     }
                     Button("Restore purchases") {
-                        Task { do { try await subscriptions.restore(); await model.connectCloudAccount() } catch { self.error = error.localizedDescription } }
+                        Task {
+                            do {
+                                try await subscriptions.restore()
+                                if subscriptions.isPro { activation = .restored }
+                                if allowCloud && authentication.account != nil { await model.connectCloudAccount() }
+                            } catch { self.error = error.localizedDescription }
+                        }
                     }.font(.subheadline.weight(.medium)).disabled(purchasing)
                     Text("Subscriptions renew automatically unless canceled through the App Store. Payment is charged to your Apple account. The review window describes which games are included, not the subscription duration.")
                         .font(.caption2).foregroundStyle(ChessMeStyle.muted).lineSpacing(3)
@@ -107,9 +125,15 @@ struct PaywallView: View {
                     }.font(.caption)
                 }.padding(24)
             }.background(ChessMeStyle.paper)
-                .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Close") { dismiss() }.accessibilityIdentifier("paywall.close") } }
+                .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Close") { dismiss() }.disabled(purchasing).accessibilityIdentifier("paywall.close") } }
+            }
+            }
                 .task { await subscriptions.load(); await loadCloudAccount() }
-
+                .interactiveDismissDisabled(purchasing)
+                .onChange(of: subscriptions.isPro) { _, active in
+                    if active && awaitingApproval { activation = .purchased; awaitingApproval = false }
+                    if !active { activation = nil }
+                }
                 .onChange(of: authentication.account) { _, _ in if allowCloud { Task { await loadCloudAccount() } } }
                 .sheet(isPresented: $showPrivacy) { PrivacyView() }
         }
@@ -121,12 +145,13 @@ struct PaywallView: View {
     }
 
     private func purchase(_ product: Product) async {
+        guard !purchasing else { return }
         purchasing = true
         error = nil
         defer { purchasing = false }
         do {
             let token: UUID?
-            if isStoreKitTesting && !model.cloud.isConfigured { token = nil }
+            if isStoreKitTesting { token = UUID() }
             else {
                 guard allowCloud else { throw CloudError.consentRequired }
                 let account = try await model.cloud.account(lichessToken: authentication.accessToken(), consented: true)
@@ -136,7 +161,15 @@ struct PaywallView: View {
                 token = account.accountToken
             }
             let result = try await subscriptions.purchase(product, appAccountToken: token)
-            if case .purchased = result { dismiss() }
+            switch result {
+            case .purchased:
+                if subscriptions.isPro { activation = .purchased }
+                else { error = "The App Store is still confirming Pro access. Try Restore purchases shortly." }
+            case .pending:
+                awaitingApproval = !subscriptions.isPro
+                if subscriptions.isPro { activation = .purchased }
+            case .cancelled: break
+            }
         } catch { self.error = error.localizedDescription }
     }
 }

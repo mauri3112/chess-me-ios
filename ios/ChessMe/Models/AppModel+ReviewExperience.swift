@@ -107,12 +107,15 @@ extension AppModel {
               let history = reviewJourney(for: game).history,
               let root = history.positions.firstIndex(where: { $0.fen == run.rootFEN }),
               Array(history.positions.prefix(root)).map(\.repetitionKey) == run.rootHistory,
-              root + run.acceptedMoves.count < history.positions.count,
-              history.positions[root + run.acceptedMoves.count].fen == run.currentFEN,
-              Array(history.moves.dropFirst(root).prefix(run.acceptedMoves.count)).map(\.uci) == run.acceptedMoves,
+              let proof = ReviewLineProof(position: history.positions[root], moves: run.sourceFinding.continuation),
+              run.acceptedMoves.count < proof.moves.count,
+              run.acceptedMoves == Array(proof.moves.prefix(run.acceptedMoves.count)),
+              proof.positions[run.acceptedMoves.count].fen == run.currentFEN,
+              proof.moves[run.acceptedMoves.count] == move.uci,
               let grade = gameAnalysis(for: game.id)?.moveAssessments?.first(where: {
-                  $0.ply == root + run.acceptedMoves.count && $0.positionFEN == run.currentFEN && $0.bestMove == move.uci
-              }), grade.completedDepth >= ReviewMoveAcceptance.minimumDepth else { return nil }
+                  $0.ply == root && $0.positionFEN == run.rootFEN && $0.bestMove == run.sourceFinding.bestMove
+              }), grade.completedDepth >= ReviewMoveAcceptance.minimumDepth,
+              run.acceptedMoves.count < grade.completedDepth else { return nil }
         return grade.completedDepth
     }
 
@@ -161,19 +164,25 @@ extension AppModel {
         }
         let targetID = linkedTargetID ?? target?.id ?? finding.id
         guard puzzle != nil || target != nil else { throw ChessError.invalidMove("The source lesson is no longer retained. Return to Games and open a supported current review.") }
-        if let resumeRunID, let pinned = reviewState.runs.first(where: { $0.id == resumeRunID && $0.isConsistent }),
+        if let resumeRunID, var pinned = reviewState.runs.first(where: { $0.id == resumeRunID && $0.isConsistent }),
            pinned.targetID == targetID, pinned.attempt.puzzleID == puzzle?.id,
-           (puzzle != nil || pinned.revision == target?.revision) { return pinned }
+           (puzzle != nil || pinned.revision == target?.revision) {
+            pinned.resumePractice()
+            _ = saveReviewRun(pinned, generation: reviewGeneration)
+            return pinned
+        }
         if resumeSessionResult, let session = reviewState.session, session.canResume,
            let completed = reviewState.runs.last(where: {
                session.attemptIDs.contains($0.id) && $0.targetID == targetID && $0.attempt.puzzleID == puzzle?.id &&
                $0.isFinished && $0.isConsistent && (puzzle != nil || $0.revision == target?.revision)
            }) { return completed }
-        if let existing = reviewState.runs.last(where: {
+        if var existing = reviewState.runs.last(where: {
             $0.targetID == targetID && $0.attempt.puzzleID == puzzle?.id && !$0.isFinished &&
             $0.rootFEN == finding.positionFEN && (puzzle != nil || $0.revision == target?.revision)
         }) {
             guard existing.isConsistent else { throw ChessError.invalidMove("This saved exercise cannot be restored safely. Skip it and start a new attempt from the lesson.") }
+            existing.resumePractice()
+            _ = saveReviewRun(existing, generation: reviewGeneration)
             changeReview { state in
                 if state.session?.id == sessionID && state.session?.targetIDs.contains(targetID) == true && state.session?.attemptIDs.contains(existing.id) == false {
                     state.session?.attemptIDs.append(existing.id)

@@ -126,7 +126,7 @@ struct ReviewExperienceTests {
         #expect(run.acceptedMoves == puzzle.solution && run.pendingReply == nil)
     }
 
-    @Test func storedGameAnswersRequireMatchingDepthAndADefenceAtTheEndpoint() throws {
+    @Test func storedGameAnswersRequireMatchingDepthAndAcceptThePinnedEndpoint() throws {
         let (_, _, journey) = try plan()
         let item = try #require(journey.moments.first { $0.kind == .plan })
         var run = try AdaptiveReviewRun(finding: item.finding, revision: "pinned")
@@ -138,9 +138,9 @@ struct ReviewExperienceTests {
         let storedDecision6 = run.submitStoredMove(move, verifiedDepth: 12)
         #expect(storedDecision6)
         run.playReply()
-        let storedDecision7 = !run.submitStoredMove(try ChessMove(uci: "a1d1"), verifiedDepth: 12)
+        let storedDecision7 = run.submitStoredMove(try ChessMove(uci: "a1d1"), verifiedDepth: 12)
         #expect(storedDecision7)
-        #expect(run.acceptedDecisions == 1 && !run.isFinished)
+        #expect(run.acceptedDecisions == 2 && run.isFinished)
     }
 
     @Test func revealedAndAcceptedContinuationsStaySeparateFromAttemptCreditInExplore() throws {
@@ -224,6 +224,17 @@ struct ReviewExperienceTests {
         #expect(!run.isFinished && run.pendingReply == "c6d5")
         run.playReply()
         #expect(!run.isFinished && run.attempt.outcome == .inProgress)
+    }
+
+    @Test func cachedAlternativeEndpointDoesNotCompleteAnUnmetGoal() throws {
+        let root = try ChessPosition(fen: "6k1/7p/2p5/3q4/8/5Q2/8/RR1R2K1 w - - 0 1")
+        var run = try AdaptiveReviewRun(finding: finding(root, line: ["d1d5", "c6d5", "f3d5"]), revision: "alternate-endpoint")
+        #expect(run.goal == .materialGain(500))
+        run.submit(try ChessMove(uci: "a1a2"), evaluation: try evaluation(root, line: ["a1a2", "h7h6", "b1b2"], score: 1000))
+        run.playReply()
+        #expect(run.submitStoredMove(try ChessMove(uci: "b1b2")))
+        #expect(run.attempt.decisions.last?.grade == .accepted)
+        #expect(run.attempt.outcome == .ungraded, "A cached move grade does not establish the source's material goal.")
     }
 
     @Test func neuralBudgetsAndIdentityHonorTheSelectedLongReview() {

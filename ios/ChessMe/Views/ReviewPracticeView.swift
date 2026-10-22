@@ -51,7 +51,7 @@ struct ReviewPracticeView: View {
                         Spacer()
                         if model.isDemo { Text("Sample") }
                     }.font(.caption).foregroundStyle(ChessMeStyle.muted)
-                    Text(run.isFinished ? run.attempt.summary : run.goal.prompt)
+                    Text(run.isFinished ? run.attempt.summary : run.practiceGoal.prompt)
                         .font(ChessMeStyle.title(22)).frame(minHeight: 54, alignment: .leading)
                         .accessibilityIdentifier("practice.prompt")
                     HStack(spacing: 8) {
@@ -67,8 +67,8 @@ struct ReviewPracticeView: View {
                                 BoardIconButton(title: "Skip replay", symbol: "forward.end.fill") { motion.stop(); introPlaying = false }
                             }
                         } else {
-                            Text(run.requiresMate ? "Complete the mating continuation." : run.acceptedDecisions <= run.requiredDecisions ?
-                                 "\(run.acceptedDecisions) of \(run.requiredDecisions) key decisions accepted." :
+                            Text(run.practiceGoal == .mate ? "Complete the mating continuation." : run.acceptedDecisions <= run.decisionLimit ?
+                                 "\(run.acceptedDecisions) of \(run.decisionLimit) key decisions accepted." :
                                  "\(run.acceptedDecisions) decisions accepted; verify the goal.")
                                 .accessibilityIdentifier("practice.decisions")
                             Spacer()
@@ -380,7 +380,7 @@ struct ReviewPracticeView: View {
         _ = model.saveReviewRun(value, generation: generation)
     }
     private func answerLine(for run: AdaptiveReviewRun) -> [String] {
-        run.acceptedMoves.isEmpty ? finding.continuation : run.remainingLine
+        run.practiceContinuation
     }
     private func hint(for run: AdaptiveReviewRun) -> String {
         guard run.hintLevel > 1, let token = answerLine(for: run).first,

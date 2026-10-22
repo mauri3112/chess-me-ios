@@ -27,12 +27,14 @@ struct RootView: View {
         .disclosureGroupStyle(FullRowDisclosureStyle())
         .toolbarBackground(ChessMeStyle.paper, for: .tabBar)
         .sheet(isPresented: $model.showConnection) { ConnectionView() }
-        .sheet(isPresented: $model.showPaywall) { PaywallView() }
+        .sheet(isPresented: $model.showPaywall, onDismiss: { model.applyRequestedProWindow() }) { PaywallView() }
         .sheet(isPresented: $model.showCloudSetup) { CloudSetupView() }
         .onChange(of: subscriptions.isPro) { _, isPro in
             model.cloudAccessVerified = false
             if !isPro { model.selectedWindow = .day }
         }
+        .onChange(of: model.isImporting) { _, importing in if !importing { model.applyRequestedProWindow() } }
+        .onChange(of: model.isSyncing) { _, syncing in if !syncing { model.applyRequestedProWindow() } }
         .onChange(of: authentication.account) { _, account in
             model.resetCloudAccess()
             if let account { model.adoptPuzzleLevel(from: account) }
@@ -337,12 +339,19 @@ struct ReviewPeriodMenu: View {
     var compact = false
     @EnvironmentObject private var model: AppModel
     @EnvironmentObject private var subscriptions: SubscriptionStore
+    @State private var showPlans = false
     var body: some View {
         Menu {
             ForEach(ReviewWindow.allCases, id: \.self) { window in
-                Button { model.select(window) } label: {
+                Button {
+                    if !window.isFree && !subscriptions.isPro {
+                        model.select(window, presentPaywall: false)
+                        showPlans = true
+                    } else { model.select(window) }
+                } label: {
                     Label(window.shortLabel, systemImage: !window.isFree && !subscriptions.isPro ? "lock" : model.selectedWindow == window ? "checkmark" : "calendar")
-                }.accessibilityIdentifier("window.\(window.accessibilityKey)")
+                }.disabled((model.isImporting || model.isSyncing) && (window.isFree || subscriptions.isPro))
+                    .accessibilityIdentifier("window.\(window.accessibilityKey)")
             }
         } label: {
             Group {
@@ -356,7 +365,8 @@ struct ReviewPeriodMenu: View {
                 }
             }.font(.subheadline).frame(minHeight: 44)
                 .background(ChessMeStyle.ink.opacity(0.05), in: Capsule())
-        }.disabled(model.isImporting || model.isSyncing).accessibilityIdentifier("games.period")
+        }.accessibilityIdentifier("games.period")
             .accessibilityLabel(model.selectedWindow.title)
+            .sheet(isPresented: $showPlans, onDismiss: { model.applyRequestedProWindow() }) { PaywallView() }
     }
 }

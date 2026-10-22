@@ -1,5 +1,12 @@
 import Foundation
 
+private struct VerifiedPracticeLine: Codable, Equatable, Sendable {
+    let startFEN: String
+    let acceptedPrefix: [String]
+    let moves: [String]
+    let depth: Int
+}
+
 public enum ReviewPracticeGoal: Codable, Equatable, Sendable {
     case mate
     case materialGain(Int)
@@ -19,6 +26,7 @@ public enum ReviewPracticeGoal: Codable, Equatable, Sendable {
 /// Persisted after each transition. A pending opponent reply is consumed exactly
 /// once, and the accepted prefix is independent of a requested demonstration.
 public struct AdaptiveReviewRun: Codable, Equatable, Identifiable, Sendable {
+    public static let maximumGameDecisions = 3
     public let id: String
     public let targetID: String
     public let revision: String
@@ -41,6 +49,7 @@ public struct AdaptiveReviewRun: Codable, Equatable, Identifiable, Sendable {
     public var feedback: String?
     public var counterline: [String] = []
     public var hintLevel = 0
+    private var verifiedContinuation: VerifiedPracticeLine?
 
     public init(finding: MoveFinding, revision: String, history: [String] = [], now: Date = Date(),
                 kind: ReviewPracticeAttempt.Kind = .game, puzzleID: String? = nil, seenBefore: Bool = false,
@@ -55,10 +64,12 @@ public struct AdaptiveReviewRun: Codable, Equatable, Identifiable, Sendable {
         self.id = id; self.targetID = target; self.revision = revision; self.rootFEN = root.fen
         self.sourceFinding = finding; self.puzzleSnapshot = puzzle
         self.currentFEN = root.fen; self.rootHistory = history; self.solver = root.sideToMove
-        self.requiresMate = proof.endsInMate
         let solverMoves = (proof.moves.count + 1) / 2
-        self.requiredDecisions = max(1, solverMoves)
-        if proof.endsInMate { self.goal = .mate }
+        self.requiredDecisions = kind == .game ? min(Self.maximumGameDecisions, max(1, solverMoves)) : max(1, solverMoves)
+        let longGameLine = kind == .game && proof.moves.count > Self.maximumGameDecisions * 2
+        self.requiresMate = proof.endsInMate && !longGameLine
+        if longGameLine { self.goal = .decisions }
+        else if proof.endsInMate { self.goal = .mate }
         else if let first = try? ChessMove(uci: proof.moves[0]), root.squares[first.from]?.kind == .pawn,
                 first.from % 8 != first.to % 8,
                 let last = try? ChessMove(uci: proof.moves.last!),
@@ -73,6 +84,15 @@ public struct AdaptiveReviewRun: Codable, Equatable, Identifiable, Sendable {
                                             topicCued: kind == .relatedPuzzle || goal != .decisions, now: now, id: id)
     }
     public var position: ChessPosition { (try? ChessPosition(fen: currentFEN)) ?? .initial }
+    /// Apply the same short lesson boundary to saved attempts from older builds.
+    public var decisionLimit: Int { attempt.kind == .game ? min(Self.maximumGameDecisions, requiredDecisions) : requiredDecisions }
+    public var practiceGoal: ReviewPracticeGoal {
+        attempt.kind == .game && sourceFinding.continuation.count > Self.maximumGameDecisions * 2 ? .decisions : goal
+    }
+    public var practiceContinuation: [String] {
+        let line = acceptedMoves.isEmpty ? sourceFinding.continuation : remainingLine
+        return attempt.kind == .game ? Array(line.prefix(max(0, decisionLimit * 2 - acceptedMoves.count))) : line
+    }
     public var isFinished: Bool { attempt.outcome != .inProgress && attempt.outcome != .interrupted }
     public var isConsistent: Bool {
         guard id == attempt.id, targetID == attempt.targetID, revision == attempt.evidenceRevision,
@@ -101,25 +121,35 @@ public struct AdaptiveReviewRun: Codable, Equatable, Identifiable, Sendable {
         return result
     }
 
-    /// Reuse only the exact pinned line. Catalogue endpoints are established by
-    /// the curated solution; game endpoints still need a verified defence.
+    /// Reuse only the exact verified line, including its final solver decision.
+    /// Fresh alternatives still need their own evaluated continuation.
     @discardableResult
     public mutating func submitStoredMove(_ move: ChessMove, verifiedDepth: Int? = nil, now: Date = Date()) -> Bool {
-        guard !isFinished, pendingReply == nil, position.sideToMove == solver,
-              let root = try? ChessPosition(fen: rootFEN),
-              let proof = ReviewLineProof(position: root, moves: sourceFinding.continuation),
-              acceptedMoves.count < proof.moves.count,
-              acceptedMoves == Array(proof.moves.prefix(acceptedMoves.count)),
-              proof.positions[acceptedMoves.count].fen == currentFEN,
-              proof.moves[acceptedMoves.count] == move.uci, position.legalMoves().contains(move) else { return false }
+        guard !isFinished, pendingReply == nil, position.sideToMove == solver else { return false }
+        if let evidence = verifiedContinuation, evidence.depth >= ReviewMoveAcceptance.minimumDepth,
+           acceptedMoves.starts(with: evidence.acceptedPrefix),
+           let start = try? ChessPosition(fen: evidence.startFEN),
+           let proof = ReviewLineProof(position: start, moves: evidence.moves) {
+            let offset = acceptedMoves.count - evidence.acceptedPrefix.count
+            if offset < evidence.depth, offset < proof.moves.count,
+               Array(acceptedMoves.dropFirst(evidence.acceptedPrefix.count)) == Array(proof.moves.prefix(offset)),
+               proof.positions[offset].fen == currentFEN, proof.moves[offset] == move.uci {
+                let line = Array(proof.moves.dropFirst(offset))
+                accept(move, line: line, now: now)
+                return true
+            }
+        }
+        guard let proof = sourceProof(matching: move) else { return false }
         let remaining = Array(proof.moves.dropFirst(acceptedMoves.count))
         let catalogue = puzzleSnapshot.map {
             $0.id == attempt.puzzleID && $0.positionFEN == rootFEN && $0.solution == proof.moves
         } ?? false
         guard catalogue || (verifiedDepth ?? 0) >= ReviewMoveAcceptance.minimumDepth else { return false }
         let mates = (try? position.applying(move).outcome()) == .checkmate(winner: solver)
-        guard catalogue || remaining.count > 1 || mates else { return false }
-        accept(move, line: remaining, now: now, catalogueEndpoint: catalogue && remaining.count == 1)
+        let endpoint = remaining.count == 1
+        // This move is part of the exact verified solution, including its last
+        // decision. Fresh alternatives still need their own evaluated defence.
+        accept(move, line: remaining, now: now, pinnedEndpoint: endpoint || mates)
         return true
     }
 
@@ -132,21 +162,39 @@ public struct AdaptiveReviewRun: Codable, Equatable, Identifiable, Sendable {
             feedback = message
             attempt.decisions.append(ReviewDecision(positionFEN: board.fen, move: move.uci, grade: .ungraded, date: now))
         case .mistake(let message, let line):
+            if sourceProof(matching: move) != nil {
+                feedback = "The saved solution and fresh analysis disagree. This move is ungraded; retry analysis or explore the line."
+                counterline = []
+                attempt.decisions.append(ReviewDecision(positionFEN: board.fen, move: move.uci, grade: .ungraded, date: now))
+                return
+            }
             feedback = message; counterline = line
             attempt.decisions.append(ReviewDecision(positionFEN: board.fen, move: move.uci, grade: .mistake, date: now))
         case .accepted(let line):
+            verifiedContinuation = VerifiedPracticeLine(startFEN: board.fen, acceptedPrefix: acceptedMoves,
+                                                       moves: line, depth: evaluation.completedDepth)
             accept(move, line: line, now: now)
         }
     }
 
-    private mutating func accept(_ move: ChessMove, line: [String], now: Date, catalogueEndpoint: Bool = false) {
+    private func sourceProof(matching move: ChessMove) -> ReviewLineProof? {
+        guard let root = try? ChessPosition(fen: rootFEN),
+              let proof = ReviewLineProof(position: root, moves: sourceFinding.continuation),
+              acceptedMoves.count < proof.moves.count,
+              acceptedMoves == Array(proof.moves.prefix(acceptedMoves.count)),
+              proof.positions[acceptedMoves.count].fen == currentFEN,
+              proof.moves[acceptedMoves.count] == move.uci, position.legalMoves().contains(move) else { return nil }
+        return proof
+    }
+
+    private mutating func accept(_ move: ChessMove, line: [String], now: Date, pinnedEndpoint: Bool = false) {
         let board = position
         guard let next = try? board.applying(move) else { return }
         attempt.decisions.append(ReviewDecision(positionFEN: board.fen, move: move.uci, grade: .accepted, date: now))
         currentFEN = next.fen; acceptedMoves.append(move.uci); acceptedDecisions += 1
         attempt.line = acceptedMoves; feedback = nil; counterline = []
         remainingLine = Array(line.dropFirst())
-        if catalogueEndpoint {
+        if pinnedEndpoint {
             attempt.outcome = .completed; attempt.endedAt = now; pendingReply = nil
         } else { finishOrPrepareReply(now: now) }
     }
@@ -155,7 +203,7 @@ public struct AdaptiveReviewRun: Codable, Equatable, Identifiable, Sendable {
         let board = position
         let terminal = board.outcome(repetitionCount: history.filter { $0 == board.repetitionKey }.count + 1)
         let objectiveReached: Bool
-        switch goal {
+        switch practiceGoal {
         case .mate: objectiveReached = terminal == .checkmate(winner: solver)
         case .materialGain(let gain):
             objectiveReached = ReviewLineProof.material(board, for: solver) - ReviewLineProof.material((try? ChessPosition(fen: rootFEN)) ?? .initial, for: solver) >= gain
@@ -182,10 +230,11 @@ public struct AdaptiveReviewRun: Codable, Equatable, Identifiable, Sendable {
         }
         // Check a non-mating payoff after the available defence, never on a
         // transient capture before an already known recapture is supplied.
-        if objectiveReached && acceptedDecisions >= requiredDecisions {
+        if objectiveReached && acceptedDecisions >= decisionLimit {
             attempt.outcome = .completed; attempt.endedAt = now; pendingReply = nil; return
         }
-        if acceptedDecisions >= requiredDecisions + 2 {
+        let limit = attempt.kind == .game ? min(Self.maximumGameDecisions, requiredDecisions + 2) : requiredDecisions + 2
+        if acceptedDecisions >= limit {
             attempt.outcome = .ungraded; attempt.endedAt = now; pendingReply = nil
             feedback = "Your moves are supported, but this branch has not established the stated goal. You can review it, try another continuation, or continue."
         }
@@ -197,6 +246,11 @@ public struct AdaptiveReviewRun: Codable, Equatable, Identifiable, Sendable {
         acceptedMoves.append(token); currentFEN = next.fen; attempt.line = acceptedMoves
         pendingReply = nil
         if remainingLine.first == token { remainingLine.removeFirst() }
+        finishOrPrepareReply(now: now)
+    }
+
+    public mutating func resumePractice(now: Date = Date()) {
+        guard !isFinished else { return }
         finishOrPrepareReply(now: now)
     }
 
@@ -224,8 +278,7 @@ public struct AdaptiveReviewRun: Codable, Equatable, Identifiable, Sendable {
         guard history.positions.last?.fen == rootFEN else { throw ChessError.invalidMove("The stored source position changed.") }
         history = try history.appending(acceptedMoves.map(ChessMove.init(uci:)))
         if attempt.outcome == .revealed {
-            let requested = acceptedMoves.isEmpty ? sourceFinding.continuation : remainingLine
-            history = try history.appending(requested.map(ChessMove.init(uci:)))
+            history = try history.appending(practiceContinuation.map(ChessMove.init(uci:)))
         }
         return ChessGame(id: "pgn-practice-" + id, username: "Practice", white: "Practice continuation",
                          black: puzzleSnapshot.map { "Lichess puzzle " + $0.id } ?? sourceFinding.gameLabel,

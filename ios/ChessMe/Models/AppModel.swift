@@ -13,6 +13,7 @@ final class AppModel: ObservableObject {
     @Published var selectedWindow: ReviewWindow = .day
     @Published var reviewCutoff = Date()
     @Published var showPaywall = false
+    @Published private(set) var requestedProWindow: ReviewWindow?
     @Published var showCloudSetup = false
     @Published var cloudAccount: CloudAccount?
     @Published var cloudAccessVerified = false
@@ -495,12 +496,22 @@ final class AppModel: ObservableObject {
         }
     }
 
-    func select(_ window: ReviewWindow) {
+    func select(_ window: ReviewWindow, presentPaywall: Bool = true) {
+        guard window == .day || subscriptions.isPro else {
+            requestedProWindow = window
+            if presentPaywall { showPaywall = true }
+            return
+        }
         guard !isImporting, !isSyncing else { return }
-        guard window == .day || subscriptions.isPro else { showPaywall = true; return }
         selectedWindow = window
         reviewCutoff = Date()
         if overnightSettings.enabled { deviceAnalysis.preferencesChanged() }
+    }
+
+    func applyRequestedProWindow() {
+        guard subscriptions.isPro, !isImporting, !isSyncing, let window = requestedProWindow else { return }
+        select(window)
+        requestedProWindow = nil
     }
 
     func loadDemo() {
