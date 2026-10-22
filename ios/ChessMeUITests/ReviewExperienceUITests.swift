@@ -28,6 +28,48 @@ final class ReviewExperienceUITests: XCTestCase {
     }
     override func tearDownWithError() throws { app.terminate(); app = nil }
 
+    func testReadyReviewOpensVisualSummaryAndContinuesIntoPractice() {
+        XCTAssertTrue(app.buttons["today.reviewReady"].waitForExistence(timeout: 5))
+        capture("Today review ready")
+        tap("today.reviewReady")
+        XCTAssertTrue(app.descendants(matching: .any)["review.visualSummary"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["review.start"].isHittable)
+        XCTAssertFalse(app.buttons["review.resume"].exists)
+        capture("Visual game summary")
+        let graph = app.descendants(matching: .any)["game.evaluationPlot"]
+        graph.coordinate(withNormalizedOffset: CGVector(dx: 0.8, dy: 0.5)).tap()
+        XCTAssertTrue(app.buttons["game.next"].waitForExistence(timeout: 5))
+        app.navigationBars.buttons.firstMatch.tap()
+        tap("review.start")
+        tap("game.nextMoment"); tap("game.nextMoment")
+        XCTAssertTrue(app.staticTexts["review.visitedCount"].waitForExistence(timeout: 5))
+        XCTAssertEqual(app.staticTexts["review.visitedCount"].label, "1 moment viewed")
+        capture("Visual review recap")
+        tap("review.practiceGame")
+        XCTAssertTrue(app.buttons["board.square.d4"].waitForExistence(timeout: 5))
+        capture("Practice from summary")
+    }
+
+    func testVisualSummarySupportsLargeText() {
+        app.terminate()
+        app.launchArguments += ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
+        app.launch(); openGame()
+        XCTAssertTrue(app.descendants(matching: .any)["review.visualSummary"].waitForExistence(timeout: 5))
+        capture("Visual summary with accessibility text")
+        let count = app.descendants(matching: .any)["review.count.blunder"]
+        for _ in 0..<5 {
+            if count.isHittable && count.frame.maxY < app.tabBars.firstMatch.frame.minY { break }
+            app.swipeUp()
+        }
+        XCTAssertTrue(count.isHittable, app.debugDescription)
+        XCTAssertLessThan(count.frame.maxY, app.tabBars.firstMatch.frame.minY)
+        XCTAssertGreaterThanOrEqual(count.frame.minX, app.frame.minX)
+        XCTAssertLessThanOrEqual(count.frame.maxX, app.frame.maxX)
+        capture("Stacked move counts with accessibility text")
+        tap("review.start")
+        XCTAssertTrue(app.buttons["game.nextMoment"].waitForExistence(timeout: 5))
+    }
+
     func testNonMatingLessonMoveAppearsBeforeEngineFeedback() {
         openGame(); tap("review.start"); tap("game.practiceMoment")
         XCTAssertTrue(app.buttons["board.square.d4"].waitForExistence(timeout: 5))

@@ -667,11 +667,12 @@ final class AppModel: ObservableObject {
     }
 
     func startSession(allSaved: Bool = false, theme: String? = nil) {
+        var findings = suggestedReviewTargets.map(\.finding)
+        if isDemo && findings.isEmpty { findings = Array(allPuzzles.prefix(ReviewLibrary.sessionSize)) }
+        guard !findings.isEmpty else { return }
         changeReview { $0.standalonePractice = nil }
         sessionTab = selectedTab
-        let targets = suggestedReviewTargets
-        session = targets.map(\.finding)
-        if isDemo && session.isEmpty { session = Array(allPuzzles.prefix(ReviewLibrary.sessionSize)) }
+        session = findings
         sessionIndex = 0; sessionFinished = false; sessionOutcomes = [:]
         changeReview { $0.session = ReviewFollowUpSession(targetIDs: session.map(\.id), findings: session) }
         activeLesson = session.first

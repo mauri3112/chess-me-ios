@@ -4,6 +4,20 @@ import ChessMeCore
 extension AppModel {
     var reviewState: ReviewLibrary { library.review ?? ReviewLibrary() }
 
+    /// A finished analysis deserves an entry point before a lesson is selected.
+    /// Stay inside the selected review period and don't replace an active practice session.
+    var nextReadyReview: ChessGame? {
+        let completed = windowGames.compactMap { game -> (ChessGame, Date)? in
+            guard let analysis = gameAnalysis(for: game.id), analysis.isComplete else { return nil }
+            return (game, analysis.completedAt)
+        }.sorted { $0.1 == $1.1 ? $0.0.id < $1.0.id : $0.1 > $1.1 }
+        for (game, _) in completed {
+            guard let bookmark = reviewState.bookmarks.first(where: { $0.gameID == game.id }) else { return game }
+            if bookmark.revision != reviewJourney(for: game).revision { return game }
+        }
+        return nil
+    }
+
     @discardableResult
     func changeReview(deferSave: Bool = false, _ change: (inout ReviewLibrary) -> Void) -> Bool {
         var state = reviewState
@@ -304,7 +318,12 @@ extension AppModel {
             .union(reviewState.attempts.filter { $0.startedAt > Date().addingTimeInterval(-3_600) && $0.outcome != .inProgress }.map(\.targetID))
         return reviewState.suggestedSet(excluding: excluded)
     }
-    var hasResumableReview: Bool { reviewState.standalonePractice != nil || reviewState.session?.canResume == true }
+    var hasResumableReview: Bool {
+        if let pending = reviewState.standalonePractice,
+           reviewState.runs.contains(where: { $0.id == pending.runID }) { return true }
+        guard let saved = reviewState.session, saved.canResume else { return false }
+        return !(saved.findings ?? saved.targetIDs.compactMap { id in reviewState.targets.first { $0.id == id }?.finding }).isEmpty
+    }
 }
 
 enum ReviewTargetAction {

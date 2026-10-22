@@ -81,6 +81,7 @@ struct GameDetailView: View {
     var resumeSavedPlace = false
     @EnvironmentObject private var model: AppModel
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.dynamicTypeSize) private var typeSize
     @State private var journey: ReviewJourney?
     @State private var place: ReviewBookmark.Place = .overview
     @State private var momentID: String?
@@ -90,9 +91,16 @@ struct GameDetailView: View {
     @State private var updateNotice: String?
     @State private var practice: ReviewPracticeEntry?
     @State private var showingDetails = false
+    @State private var exploredPly: Int?
     private var analysis: GameAnalysis? { model.gameAnalysis(for: game.id) }
     private var moment: ReviewMoment? { journey?.moments.first { $0.id == momentID } }
     private var momentIndex: Int { journey?.moments.firstIndex { $0.id == momentID } ?? 0 }
+    private var summary: GameReviewSummary { GameReviewSummary(game: game, analysis: analysis, history: journey?.history) }
+    private var eligible: [MoveFinding] { journey?.moments.filter { $0.finding.isPuzzle }.map(\.finding) ?? [] }
+    private var canResume: Bool {
+        guard let savedResume, let journey, savedResume.place != .overview else { return false }
+        return savedResume.place == .recap || journey.moments.contains { $0.id == savedResume.momentID }
+    }
 
     var body: some View {
         ScrollView {
@@ -132,8 +140,10 @@ struct GameDetailView: View {
         .task {
             guard journey == nil else { return }
             journey = model.reviewJourney(for: game)
-            savedResume = model.reviewState.bookmarks.first { $0.gameID == game.id && (!$0.finished || resumeSavedPlace) }
-            visited = savedResume?.visited ?? []
+            let restored = model.reviewState.bookmarks.first { $0.gameID == game.id }?.reconciled(with: journey!)
+            savedResume = restored.flatMap { !$0.finished || resumeSavedPlace ? $0 : nil }
+            visited = restored?.visited ?? []
+            if let restored { model.saveBookmark(restored) }
             model.reconcileReview(game: game, journey: journey!)
             if let initialMomentID { open(initialMomentID, at: initialStep) }
             else if resumeSavedPlace, let savedResume {
@@ -143,6 +153,7 @@ struct GameDetailView: View {
             else if let main = journey?.moments.first(where: { $0.id == journey?.mainTakeawayID }) {
                 model.encountered(main, game: game, journey: journey!, lineShown: false)
             }
+            if place == .overview, restored == nil, analysis?.isComplete == true { bookmark() }
         }
         .onChange(of: analysis) { _, _ in
             let latest = model.reviewJourney(for: game)
@@ -191,11 +202,19 @@ struct GameDetailView: View {
                     VStack(alignment: .leading, spacing: 18) {
                         GamePlayerNames(game: game, outcome: model.outcome(for: game), prominent: true)
                         status
+                        if let analysis {
+                            Text("Engine: \(analysis.engineVersion)").font(.caption)
+                            Text("Move grades are estimates from the saved analysis. Sound includes best, excellent, good, and brilliant candidates. Book moves follow known opening theory.")
+                                .font(.subheadline)
+                        }
                         if let moment { Text(moment.title).font(ChessMeStyle.title(23)); Text(moment.explanation) }
                     }.padding(22)
                 }.background(ChessMeStyle.paper).navigationTitle("Review details")
                     .toolbar { Button("Done") { showingDetails = false } }
             }
+        }
+        .navigationDestination(isPresented: Binding(get: { exploredPly != nil }, set: { if !$0 { exploredPly = nil } })) {
+            GameReplayExplorer(game: game, initialPly: exploredPly ?? 0)
         }
         .sheet(item: $practice) { entry in
             NavigationStack {
@@ -205,71 +224,105 @@ struct GameDetailView: View {
     }
 
     private var status: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 6) {
             if let analysis {
-                Text("\(analysis.source.capitalized) review · \(analysis.analyzedPlies)/\(analysis.totalPlies) decisions")
+                Label("\(analysis.source == "cloud" ? "Cloud" : "Device") review · \(analysis.isComplete ? "Ready" : "Partial") · \(analysis.analyzedPlies)/\(analysis.totalPlies) moves",
+                      systemImage: analysis.source == "cloud" ? "cloud" : "iphone")
                     .font(.caption).foregroundStyle(ChessMeStyle.muted).accessibilityIdentifier("game.reviewStatus")
-                Text("Saved analysis: " + (analysis.engineVersion.hasPrefix("arasan") ? "Arasan 26" :
-                     analysis.engineVersion.hasPrefix("stockfish") ? "Stockfish 19" : "\(analysis.engineVersion)"))
-                    .font(.caption).foregroundStyle(ChessMeStyle.muted)
-                if !analysis.isComplete { Text("Takeaways cover the analysed portion of this game.").font(.caption) }
+                if !analysis.isComplete { Text("Summary covers the reviewed moves so far.").font(.caption) }
                 if let job = model.localAnalysisJob(for: game.id), job.isPending {
-                    Text(analysis.isComplete ? "Your saved review is ready. A deeper pass is \(job.state.rawValue)." : job.statusText)
+                    Text(analysis.isComplete ? "Deeper review \(job.state == .running ? "running" : "queued")" : job.statusText)
                         .font(.caption).accessibilityIdentifier("game.deeperReviewStatus")
                 }
             } else {
-                Text(model.localAnalysisJob(for: game.id)?.statusText ?? "No saved analysis yet. You can still replay the game.")
-                    .font(.subheadline)
+                Text(model.localAnalysisJob(for: game.id)?.statusText ?? "Ready to review on this device")
+                    .font(.subheadline).foregroundStyle(ChessMeStyle.muted)
             }
         }
     }
 
     private var overview: some View {
         VStack(alignment: .leading, spacing: 18) {
-            if let main = journey?.moments.first(where: { $0.id == journey?.mainTakeawayID }) {
-                PaperCard {
-                    VStack(alignment: .leading, spacing: 10) {
-                        Eyebrow(text: "Main takeaway")
-                        Button { open(main.id) } label: {
-                            Text(main.title).font(ChessMeStyle.title(24)).foregroundStyle(ChessMeStyle.ink)
-                        }.accessibilityIdentifier("review.mainTakeaway")
-                    }
-                }
+            if !summary.assessments.isEmpty {
+                GameReviewSummaryView(summary: summary, source: analysis?.source ?? "device") { exploredPly = $0 }
             }
-            if let savedResume, let journey,
-               (savedResume.place == .recap || journey.moments.contains(where: { $0.id == savedResume.momentID })),
-               savedResume.place != .overview {
+            if canResume, let savedResume {
                 PrimaryButton(title: "Resume review", symbol: "play.fill") {
                     if savedResume.place == .recap { place = .recap }
                     else if let id = savedResume.momentID { open(id, at: savedResume.step) }
                 }.accessibilityIdentifier("review.resume")
-            }
-            if let first = journey?.moments.first {
+            } else if let first = journey?.moments.first {
                 PrimaryButton(title: "Review key moments", symbol: "play.fill") { open(first.id) }
                     .accessibilityIdentifier("review.start")
             } else if analysis?.isComplete == true {
-                Text("No clear teaching moments were found by this review. You can still explore the game.")
+                Text("No key moments found. Explore any move below.").font(.subheadline).foregroundStyle(ChessMeStyle.muted)
             }
-            NavigationLink { GameReplayExplorer(game: game) } label: { Label("Explore game", systemImage: "arrow.triangle.branch") }
-                .accessibilityIdentifier("game.explore")
-            ForEach(journey?.moments ?? []) { item in
-                Button { open(item.id) } label: {
-                    HStack(alignment: .top, spacing: 12) {
-                        Text("Move \(item.finding.moveNumber)").font(.caption.monospacedDigit())
-                        VStack(alignment: .leading, spacing: 5) {
-                            Text(item.title).font(.subheadline.weight(.semibold))
-                            Text(item.kind == .plan ? "Plan sequence · \(item.plies.count) key decisions" :
-                                 item.kind == .strength ? "An instructive strong decision" : "An improvement to consider")
-                                .font(.caption).foregroundStyle(ChessMeStyle.muted)
-                        }
-                        Spacer()
-                        Image(systemName: visited.contains(item.id) ? "checkmark.circle" : "chevron.right")
-                    }.foregroundStyle(ChessMeStyle.ink).padding(.vertical, 10)
-                }.buttonStyle(.plain).accessibilityIdentifier("review.moment.\(item.id)")
+            if analysis?.isComplete != true, let action = model.deviceReviewAction(for: game.id) {
+                if model.windowGames.contains(where: { $0.id == game.id }) {
+                    PrimaryButton(title: action, symbol: "cpu") { model.analyzeOnDevice(gameID: game.id) }
+                        .disabled(model.isImporting || model.cloudIsRunning || !DeviceAnalysisCoordinator.hardware.supportsOvernight)
+                        .accessibilityIdentifier("review.analyze")
+                } else {
+                    Text("This game is outside your selected review period.").font(.caption).foregroundStyle(ChessMeStyle.muted)
+                }
+            }
+            takeaway
+            HStack(spacing: 20) {
+                NavigationLink { GameReplayExplorer(game: game) } label: { Label("Explore game", systemImage: "arrow.triangle.branch") }
+                    .accessibilityIdentifier("game.explore")
+                if !eligible.isEmpty {
+                    Button { practice = ReviewPracticeEntry(findings: eligible) } label: { Label("Practise", systemImage: "scope") }
+                        .accessibilityIdentifier("review.practiceGame")
+                }
+            }.font(.subheadline.weight(.semibold)).frame(minHeight: 44)
+            if let journey, !journey.moments.isEmpty {
+                DisclosureGroup("\(journey.moments.count) key \(journey.moments.count == 1 ? "moment" : "moments")") {
+                    ForEach(journey.moments) { item in momentRow(item) }
+                }.font(.subheadline.weight(.semibold)).accessibilityIdentifier("review.moments")
             }
             observations
-            Button("Finish for now") { place = .recap; bookmark() }.frame(minHeight: 44)
+            if !(journey?.moments.isEmpty ?? true) {
+                Button("Finish for now") { place = .recap; bookmark() }.frame(minHeight: 44)
+            }
         }
+    }
+
+    @ViewBuilder private var takeaway: some View {
+        if let main = journey?.moments.first(where: { $0.id == journey?.mainTakeawayID }) {
+            Button { open(main.id) } label: {
+                PaperCard {
+                    HStack(spacing: 16) {
+                        if !typeSize.isAccessibilitySize {
+                            ChessBoardView(position: main.lineProof?.positions.first ?? (try? ChessPosition(fen: main.finding.positionFEN)) ?? .initial,
+                                           perspective: game.playerSide)
+                                .frame(width: 88, height: 88).accessibilityHidden(true)
+                        }
+                        VStack(alignment: .leading, spacing: 6) {
+                            Eyebrow(text: "Takeaway")
+                            Text(main.title).font(ChessMeStyle.title(21)).foregroundStyle(ChessMeStyle.ink)
+                            Text("Move \(main.finding.moveNumber)").font(.caption).foregroundStyle(ChessMeStyle.muted)
+                        }
+                        Spacer(minLength: 0)
+                        Image(systemName: "chevron.right").font(.caption)
+                    }
+                }
+            }.buttonStyle(.plain).accessibilityIdentifier("review.mainTakeaway")
+        }
+    }
+
+    private func momentRow(_ item: ReviewMoment) -> some View {
+        Button { open(item.id) } label: {
+            HStack(spacing: 12) {
+                Text("\(item.finding.moveNumber)").font(.subheadline.monospacedDigit()).frame(minWidth: 24)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(item.title).font(.subheadline.weight(.medium))
+                    Text(item.kind == .plan ? "Plan · \(item.plies.count) moves" : item.kind == .strength ? "Well played" : item.finding.estimatedQuality.title)
+                        .font(.caption).foregroundStyle(ChessMeStyle.muted)
+                }
+                Spacer()
+                Image(systemName: visited.contains(item.id) ? "checkmark.circle.fill" : "chevron.right")
+            }.foregroundStyle(ChessMeStyle.ink).padding(.vertical, 10)
+        }.buttonStyle(.plain).accessibilityIdentifier("review.moment.\(item.id)")
     }
 
     private func momentView(_ item: ReviewMoment) -> some View {
@@ -295,21 +348,19 @@ struct GameDetailView: View {
 
     private var recap: some View {
         VStack(alignment: .leading, spacing: 18) {
-            Text("Review recap").font(ChessMeStyle.title(28))
-            Text("\(visited.count) of \(journey?.moments.count ?? 0) selected moments visited.").font(.subheadline)
-            Text("Reviewing and practising are recorded separately.").font(.caption).foregroundStyle(ChessMeStyle.muted)
-            if let main = journey?.moments.first(where: { $0.id == journey?.mainTakeawayID }) {
-                Button("Main takeaway: " + main.title) { open(main.id) }
-            }
-            let eligible = journey?.moments.filter { $0.finding.isPuzzle }.map(\.finding) ?? []
+            ReviewCompletionRing(visited: visited.count, total: journey?.moments.count ?? 0)
+            takeaway
             if !eligible.isEmpty {
-                PrimaryButton(title: "Practice from this game", symbol: "scope") {
+                PrimaryButton(title: "Practise these moments", symbol: "scope") {
                     practice = ReviewPracticeEntry(findings: eligible)
                 }.accessibilityIdentifier("review.practiceGame")
             }
             if let journey { ReviewRelatedList(moments: journey.moments, returnGameID: game.id) }
-            ForEach((journey?.moments ?? []).filter { !visited.contains($0.id) }) { item in
-                Button("Not visited: " + item.title) { open(item.id) }
+            let remaining = (journey?.moments ?? []).filter { !visited.contains($0.id) }
+            if !remaining.isEmpty {
+                DisclosureGroup("\(remaining.count) more to review") {
+                    ForEach(remaining) { item in momentRow(item) }
+                }
             }
             Button("Return to overview", action: showOverview).frame(minHeight: 44)
             observations
@@ -344,7 +395,7 @@ struct GameDetailView: View {
             updateNotice = "This review changed. Choose a moment from the updated overview."
         }
         journey = latest
-        if savedResume != nil { savedResume?.revision = latest.revision }
+        savedResume = savedResume?.reconciled(with: latest)
         visited = visited.filter { id in latest.moments.contains { $0.id == id } }
         model.reconcileReview(game: game, journey: latest)
     }
@@ -362,7 +413,7 @@ struct ReviewRelatedList: View {
     var body: some View {
         let connections = uniqueConnections
         if !connections.isEmpty {
-            Text("Optional related positions").font(ChessMeStyle.title(21))
+            DisclosureGroup("Related puzzles · \(connections.count)") {
             ForEach(connections) { connection in
                 NavigationLink {
                     ReviewPracticeView(finding: connection.puzzle.reviewFinding, puzzle: connection.puzzle,
@@ -370,15 +421,15 @@ struct ReviewRelatedList: View {
                                        sessionID: sessionID, returnGameID: returnGameID)
                 } label: {
                     VStack(alignment: .leading, spacing: 4) {
-                        Text("Try a related position · estimated \(connection.puzzle.rating)").font(.subheadline)
-                        Text("Lichess catalogue · optional").font(.caption).foregroundStyle(ChessMeStyle.muted)
+                        Text("Try a related puzzle · \(connection.puzzle.rating)").font(.subheadline)
+                        Text("Lichess").font(.caption).foregroundStyle(ChessMeStyle.muted)
                         if model.hasSeenReviewPuzzle(connection.puzzle) { Text("Previously seen puzzle").font(.caption) }
                     }.padding(.vertical, 8)
                 }
             }
-        } else {
-            Text(model.puzzlesLoading ? "Related-position matching is in progress. You can continue." :
-                 "No verified related position is available for these lessons.").font(.caption).foregroundStyle(ChessMeStyle.muted)
+            }
+        } else if model.puzzlesLoading {
+            ProgressView("Finding related puzzles…").font(.caption)
         }
     }
     private var uniqueConnections: [ReviewPuzzleConnection] {

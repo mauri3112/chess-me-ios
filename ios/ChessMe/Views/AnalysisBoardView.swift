@@ -183,11 +183,17 @@ struct EvaluationTimeline: View {
     let selectedPly: Int
     var source = "device"
     var highlightedQuality: MoveQuality?
+    var title: String? = nil
+    var endLabel: String? = nil
+    var accessibilitySelection: String? = nil
+    var onAdjust: ((Int) -> Void)? = nil
     let onSelect: (Int) -> Void
+    @Environment(\.dynamicTypeSize) private var typeSize
+    private var plotHeight: CGFloat { typeSize.isAccessibilitySize ? 160 : 90 }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Evaluation · \(source == "cloud" ? "cloud" : "on device")").font(.caption.weight(.medium)).foregroundStyle(ChessMeStyle.muted)
+            Text(title ?? "Evaluation · \(source == "cloud" ? "cloud" : "on device")").font(.caption.weight(.medium)).foregroundStyle(ChessMeStyle.muted)
             HStack(spacing: 8) {
             VStack(alignment: .leading) {
                 Text("+10")
@@ -195,7 +201,7 @@ struct EvaluationTimeline: View {
                 Text("0")
                 Spacer()
                 Text("−10")
-            }.font(.caption2.monospacedDigit()).foregroundStyle(ChessMeStyle.muted).frame(height: 74).padding(.vertical, 8)
+            }.font(.caption2.monospacedDigit()).foregroundStyle(ChessMeStyle.muted).frame(height: plotHeight - 16).padding(.vertical, 8)
             GeometryReader { geometry in
                 Canvas { context, size in
                     let sorted = assessments.sorted { $0.ply < $1.ply }
@@ -227,24 +233,24 @@ struct EvaluationTimeline: View {
                     if let nearest = EvaluationTimelineGeometry(size: geometry.size, totalPlies: totalPlies).nearest(to: location.x, assessments: candidates) { onSelect(nearest.ply + 1) }
                 }
                 .accessibilityHidden(true)
-            }.frame(height: 90)
+            }.frame(height: plotHeight)
                 .accessibilityElement(children: .ignore)
                 .accessibilityLabel("Evaluation graph")
                 .accessibilityValue(highlightedQuality.map { quality in
                     let count = assessments.filter { $0.quality == quality }.count
                     return "\(count) \(quality.title) \(count == 1 ? "move" : "moves") highlighted"
-                } ?? "All reviewed moves")
+                } ?? accessibilitySelection ?? "All reviewed moves")
                 .accessibilityIdentifier("game.evaluationPlot")
                 .accessibilityAdjustableAction { direction in
                     let candidates = assessments.filter { highlightedQuality == nil || $0.quality == highlightedQuality }.sorted { $0.ply < $1.ply }
                     let next = direction == .increment ? candidates.first { $0.ply + 1 > selectedPly } : candidates.last { $0.ply + 1 < selectedPly }
-                    if let next { onSelect(next.ply + 1) }
+                    if let next { (onAdjust ?? onSelect)(next.ply + 1) }
                 }
             }
             HStack {
                 Text("Start")
                 Spacer()
-                Text("\(totalPlies) plies")
+                Text(endLabel ?? "\(totalPlies) plies")
             }.font(.caption2).foregroundStyle(ChessMeStyle.muted)
         }.accessibilityElement(children: .contain).accessibilityIdentifier("game.evaluationTimeline")
     }

@@ -130,7 +130,7 @@ final class ChessMeUITests: XCTestCase {
     }
 
     func testGameAllowsAnimatedVariationsAndReturnsToOriginalTimeline() throws {
-        XCTAssertTrue(app.buttons["lesson.start"].waitForExistence(timeout: 90))
+        XCTAssertTrue(app.buttons["today.reviewReady"].waitForExistence(timeout: 90))
         app.tabBars.buttons["Games"].tap()
         let game = app.buttons["game.open.demo-missed-mate"]
         XCTAssertTrue(game.waitForExistence(timeout: 5), app.debugDescription)
@@ -159,7 +159,7 @@ final class ChessMeUITests: XCTestCase {
     }
 
     func testReviewClocksFollowMovesAndDoNotAssignTimesToVariations() {
-        XCTAssertTrue(app.buttons["lesson.start"].waitForExistence(timeout: 90))
+        XCTAssertTrue(app.buttons["today.reviewReady"].waitForExistence(timeout: 90))
         app.tabBars.buttons["Games"].tap()
         let game = app.buttons["game.open.demo-missed-mate"]
         XCTAssertTrue(game.waitForExistence(timeout: 5))
@@ -409,7 +409,7 @@ final class ChessMeUITests: XCTestCase {
     }
 
     func testGameReviewKeepsItsQueueWhenNavigatingAway() throws {
-        let start = app.buttons["lesson.start"]
+        let start = app.buttons["today.reviewReady"]
         XCTAssertTrue(start.waitForExistence(timeout: 90))
         let complete = expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: app.buttons["review.pause"])
         wait(for: [complete], timeout: 90)

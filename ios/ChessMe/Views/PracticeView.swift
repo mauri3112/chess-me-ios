@@ -24,24 +24,23 @@ struct PracticeView: View {
                     VStack(alignment: .leading, spacing: 14) {
                         Text("From your reviews").font(ChessMeStyle.title(24))
                         let count = model.suggestedReviewTargets.count
-                        Text("\(model.readyReviewTargets.count) lessons ready · suggested set: \(count) \(count == 1 ? "position" : "positions")")
+                        Text("\(model.readyReviewTargets.count) lessons ready")
                             .font(.subheadline).foregroundStyle(ChessMeStyle.muted)
                         if model.hasResumableReview {
                             PrimaryButton(title: "Resume practice", symbol: "play.fill") { model.resumeReviewSession() }
                                 .accessibilityIdentifier("practice.resume")
                         }
-                        if count > 0 || model.isDemo && !model.allPuzzles.isEmpty {
+                        else if count > 0 || model.isDemo && !model.allPuzzles.isEmpty {
                             PrimaryButton(title: "Start short practice", symbol: "play.fill") { model.startSession(allSaved: true) }
                                 .accessibilityIdentifier("practice.start")
                         } else {
-                            Text("Review a teaching moment to add a lesson. You can also practise any retained lesson now.").font(.subheadline)
+                            Text("Review a game to find your next lesson.").font(.subheadline)
                             Button("View games") { model.selectedTab = AppTab.games.rawValue }.frame(minHeight: 44)
                         }
-                        Text("Suggestions adapt to mistakes, help, and later recall. Missing a day does not reset your progress.").font(.caption)
                     }
                 }
                 NavigationLink { PuzzlesView() } label: {
-                    destination("Related puzzles", detail: "Optional catalogue practice", symbol: "puzzlepiece.extension")
+                    destination("Puzzles", detail: "Find a new challenge", symbol: "puzzlepiece.extension")
                 }.accessibilityIdentifier("practice.puzzles")
                 NavigationLink { FavoritesView() } label: {
                     destination("Saved positions", detail: "Lessons and puzzles you've kept", symbol: "heart")

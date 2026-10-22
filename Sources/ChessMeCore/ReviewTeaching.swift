@@ -68,11 +68,11 @@ public struct ReviewIdeaProof: Equatable, Sendable {
                 }
             }
             return Self(key: key, title: "Build a mating attack",
-                        explanation: detail + " Inspect the replies in this line; another reply needs its own verification.", line: line)
+                        explanation: detail, line: line)
         }
         if first.promotion != nil {
             return Self(key: "promotion", title: "Make the promotion count",
-                        explanation: "\(line.notation[0]) promotes the pawn on \(ReviewLineProof.square(first.to)). The shown continuation lets you inspect the resulting position.", line: line)
+                        explanation: "\(line.notation[0]) promotes the pawn on \(ReviewLineProof.square(first.to)).", line: line)
         }
         let after = line.positions[1]
         let targets = after.squares.indices.filter {
@@ -90,7 +90,7 @@ public struct ReviewIdeaProof: Equatable, Sendable {
         if targets.count >= 2, line.materialGain >= 100, forkPayoff {
             let names = targets.prefix(2).map { "\(after.squares[$0]!.kind.rawValue) on \(ReviewLineProof.square($0))" }
             return Self(key: "fork-\(piece.kind.rawValue)", title: "Create two threats",
-                        explanation: "\(line.notation[0]) attacks the \(names.joined(separator: " and ")). The shown replies lead to a material gain; compare a different defence in Explore.", line: line)
+                        explanation: "\(line.notation[0]) attacks the \(names.joined(separator: " and ")). This line wins material.", line: line)
         }
         if line.materialGain >= 100 {
             let captures = line.moves.indices.compactMap { index -> String? in
@@ -100,8 +100,8 @@ public struct ReviewIdeaProof: Equatable, Sendable {
                 return "\(line.notation[index]) captures the \(victim.kind.rawValue) on \(ReviewLineProof.square(move.to))"
             }
             if let capture = captures.first {
-                return Self(key: "material-gain", title: "Win material with a continuation",
-                            explanation: capture + ". Follow the replies to see the resulting material balance. This is a demonstrated line, not a claim that every reply is forced.", line: line)
+                return Self(key: "material-gain", title: "Win material",
+                            explanation: capture + ". This line gains material.", line: line)
             }
         }
         return nil

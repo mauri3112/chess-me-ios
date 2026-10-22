@@ -14,6 +14,41 @@ final class ReviewPresentationTests: XCTestCase {
         else { UserDefaults.standard.removeObject(forKey: "analysis.overnight.settings") }
         try super.tearDownWithError()
     }
+    @MainActor
+    func testEmptyPracticeCannotLeaveAnInertResumeAction() {
+        let model = AppModel(previewLibrary: LibrarySnapshot())
+        model.startSession()
+        XCTAssertNil(model.reviewState.session)
+        model.changeReview { $0.session = ReviewFollowUpSession(targetIDs: [], findings: []) }
+        XCTAssertFalse(model.hasResumableReview)
+        XCTAssertNil(model.activeLesson)
+    }
+
+    @MainActor
+    func testReadySummaryReturnsAfterAnEarlierPartialVisitAndHidesAfterReading() throws {
+        let game = try XCTUnwrap(DemoContent.games().first)
+        let partial = GameAnalysis(gameID: game.id, findings: [], analyzedPlies: 1, totalPlies: 2)
+        let model = AppModel(previewLibrary: LibrarySnapshot(games: [game], analyses: [partial], isDemo: true))
+        let before = model.reviewJourney(for: game)
+        model.saveBookmark(ReviewBookmark(gameID: game.id, revision: before.revision))
+        XCTAssertNil(model.nextReadyReview, "Partial reviews never announce completion")
+        let complete = GameAnalysis(gameID: game.id, findings: [], analyzedPlies: 2, totalPlies: 2)
+        model.updateLibrary { $0.analyses = [complete] }
+        XCTAssertEqual(model.nextReadyReview?.id, game.id, "An earlier visit must not hide the completed summary")
+        model.saveBookmark(ReviewBookmark(gameID: game.id, revision: model.reviewJourney(for: game).revision))
+        XCTAssertNil(model.nextReadyReview)
+    }
+
+    @MainActor
+    func testReadySummaryKeepsReviewsOutsideTheSelectedPeriodOut() {
+        let old = ChessGame(id: "old", username: "Learner", white: "Learner", black: "Partner",
+                            playedAt: Date().addingTimeInterval(-172_800), playerSide: .white, moves: "e4 e5", status: "resign")
+        let analysis = GameAnalysis(gameID: old.id, findings: [], analyzedPlies: 1, totalPlies: 1)
+        let model = AppModel(previewLibrary: LibrarySnapshot(games: [old], analyses: [analysis]))
+        model.selectedWindow = .day
+        XCTAssertNil(model.nextReadyReview)
+    }
+
     private func completeJob(game: ChessGame, configuration: DeviceEngineConfiguration) throws -> LocalAnalysisJob {
         let analysis = try LocalAnalyzer(options: AnalysisOptions(maximumDepth: 1)).analyze(game: game)
         let review = GameAnalysis(gameID: game.id, findings: analysis.findings, analyzedPlies: analysis.analyzedPlies,

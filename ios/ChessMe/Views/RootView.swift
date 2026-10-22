@@ -199,6 +199,7 @@ private struct TodayAnalysisQueueView: View {
 struct ReviewView: View {
     @EnvironmentObject private var model: AppModel
     @EnvironmentObject private var authentication: LichessAuthentication
+    @State private var readyGame: ChessGame?
     private var next: MoveFinding? { model.nextLesson() ?? model.allDuePuzzles.first ?? model.allPuzzles.first }
 
     var body: some View {
@@ -213,7 +214,7 @@ struct ReviewView: View {
                     HStack {
                         VStack(alignment: .leading, spacing: 5) {
                             Text("\(model.library.games.count) games imported").font(.subheadline.weight(.medium))
-                            Text("\(model.completedGames) reviewed in this period · \(model.readyReviewTargets.count) follow-up lessons ready")
+                            Text("\(model.completedGames) reviewed · \(model.readyReviewTargets.count) lessons ready")
                                 .font(.caption).foregroundStyle(ChessMeStyle.muted)
                         }
                         Spacer()
@@ -225,16 +226,15 @@ struct ReviewView: View {
                             .accessibilityIdentifier("cloud.open")
                     }
                 }
-                if !model.readyReviewTargets.isEmpty || model.hasResumableReview {
+                if !model.suggestedReviewTargets.isEmpty || model.hasResumableReview {
                     PaperCard {
                         VStack(alignment: .leading, spacing: 10) {
-                            Text("Follow-up practice").font(ChessMeStyle.title(22))
-                            Text("A short set from lessons you reviewed. Related puzzles stay optional.").font(.subheadline)
+                            Text("Back to practice").font(ChessMeStyle.title(22))
                             Button(model.hasResumableReview ? "Resume practice" : "Start short practice") {
                                 if model.hasResumableReview { model.resumeReviewSession() }
                                 else { model.startSession() }
                             }.frame(minHeight: 44).accessibilityIdentifier("today.followUp")
-                            Button("Manage lessons and view evidence") { model.selectedTab = AppTab.practice.rawValue }
+                            Button("Your lessons") { model.selectedTab = AppTab.practice.rawValue }
                         }
                     }
                 }
@@ -244,6 +244,9 @@ struct ReviewView: View {
         }
         .accessibilityIdentifier("main.scroll").background(ChessMeStyle.paper)
         .toolbar(.hidden, for: .navigationBar)
+        .navigationDestination(isPresented: Binding(get: { readyGame != nil }, set: { if !$0 { readyGame = nil } })) {
+            if let readyGame { GameDetailView(game: readyGame) }
+        }
     }
 
     private var quickPractice: some View {
@@ -275,6 +278,25 @@ struct ReviewView: View {
         if model.activeLesson != nil {
             PrimaryButton(title: "Continue practice", symbol: "play.fill") { model.selectedTab = model.sessionTab ?? AppTab.practice.rawValue }
                 .accessibilityIdentifier("lesson.continue")
+        } else if let game = model.nextReadyReview {
+            PaperCard {
+                VStack(alignment: .leading, spacing: 16) {
+                    Label("Review ready", systemImage: "checkmark.circle.fill").font(.subheadline.weight(.semibold))
+                        .foregroundStyle(ChessMeStyle.green)
+                    GamePlayerNames(game: game, outcome: model.outcome(for: game), prominent: true)
+                    if let review = model.gameAnalysis(for: game.id) {
+                        Text(review.source == "cloud" ? "Cloud review" : "Device review")
+                            .font(.caption).foregroundStyle(ChessMeStyle.muted)
+                    }
+                    Button { readyGame = game } label: {
+                        HStack {
+                            Text("See game summary").fontWeight(.semibold)
+                            Spacer(); Image(systemName: "arrow.right")
+                        }.padding(18).foregroundStyle(.white)
+                            .background(ChessMeStyle.green, in: RoundedRectangle(cornerRadius: 16))
+                    }.accessibilityIdentifier("today.reviewReady")
+                }
+            }
         } else if let next {
             PaperCard {
                 VStack(alignment: .leading, spacing: 18) {
