@@ -31,11 +31,15 @@ struct ChessBoardView: View {
     var rejectionCount = 0
     var successCount = 0
     var successSquare: Int?
+    var playsMoveSounds = false
     var onSquare: ((Int) -> Void)?
     @Environment(\.chessBoardDesign) private var design
     @Environment(\.chessReduceMotion) private var reduceMotion
+    @Environment(\.scenePhase) private var scenePhase
+    @AppStorage(BoardSoundPlayer.preferenceKey) private var boardSounds = true
     @State private var pieces: [AnimatedBoardPiece] = []
     @State private var successPhase: CGFloat = 1
+    @State private var pendingSound: Task<Void, Never>?
 
     var body: some View {
         GeometryReader { geometry in
@@ -165,8 +169,27 @@ struct ChessBoardView: View {
         .accessibilityLabel("\(design.title) chessboard")
         .accessibilityValue(suggestions.isEmpty ? (arrows.isEmpty ? "No engine suggestions" : "\(arrows.count) engine suggestions") : "\(suggestions.count) good move highlights")
         .accessibilityIdentifier("board.design.\(design.rawValue)")
-        .onAppear { reconcile(animate: false) }
-        .onChange(of: position) { _, _ in reconcile(animate: true) }
+        .onAppear {
+            reconcile(animate: false)
+            if playsMoveSounds && boardSounds { BoardSoundPlayer.shared.prepare() }
+        }
+        .onChange(of: position) { before, after in
+            reconcile(animate: true)
+            pendingSound?.cancel()
+            guard playsMoveSounds, boardSounds, scenePhase == .active,
+                  let sound = BoardSound.transition(from: before, to: after) else { return }
+            pendingSound = Task { @MainActor in
+                do {
+                    // Match the piece landing, with no delay for reduced motion.
+                    if !reduceMotion { try await Task.sleep(for: .milliseconds(200)) }
+                    try Task.checkCancellation()
+                    BoardSoundPlayer.shared.play(sound)
+                } catch { }
+            }
+        }
+        .onChange(of: scenePhase) { _, phase in if phase != .active { pendingSound?.cancel() } }
+        .onChange(of: boardSounds) { _, enabled in if !enabled { pendingSound?.cancel() } }
+        .onDisappear { pendingSound?.cancel() }
         .onChange(of: successCount) { _, _ in
             guard !reduceMotion else { return }
             var transaction = Transaction(); transaction.disablesAnimations = true

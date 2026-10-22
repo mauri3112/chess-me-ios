@@ -8,6 +8,7 @@ struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
     @AppStorage(ChessBoardDesign.preferenceKey) private var storedDesign = ChessBoardDesign.classic.rawValue
     @AppStorage("analysis.showEvaluationBar") private var showEvaluationBar = true
+    @AppStorage(BoardSoundPlayer.preferenceKey) private var boardSounds = true
     @State private var deleteLocal = false
     @State private var deleteCloud = false
     @State private var disconnect = false
@@ -55,6 +56,12 @@ struct SettingsView: View {
                         LabeledContent("Design", value: (ChessBoardDesign(rawValue: storedDesign) ?? .classic).title)
                     }
                     .accessibilityIdentifier("settings.design")
+                }
+                Section {
+                    Toggle("Board sounds", isOn: $boardSounds)
+                        .accessibilityIdentifier("settings.boardSounds")
+                } header: { Text("Sound") } footer: {
+                    Text("Soft taps for moves, captures and checks. Follows silent mode and mixes with your music.")
                 }
                 Section("Subscription") {
                     LabeledContent("Access", value: subscriptions.isPro ? "Pro" : "Free · 24 hours")

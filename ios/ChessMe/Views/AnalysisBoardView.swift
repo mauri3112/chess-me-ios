@@ -79,7 +79,7 @@ struct AnalysisBoardView: View {
             ChessBoardView(position: position, perspective: perspective, selectedSquare: selectedSquare,
                            targets: targets, highlightedSquares: highlightedSquares, arrows: arrows, moveMarker: moveMarker,
                            suggestions: suggestions, rejectionCount: rejectionCount,
-                           successCount: successCount, successSquare: successSquare, onSquare: onSquare)
+                           successCount: successCount, successSquare: successSquare, playsMoveSounds: true, onSquare: onSquare)
         }
         .aspectRatio(showEvaluationBar ? 1.11 : 1, contentMode: .fit)
         .onChange(of: evaluationPosition ?? position, initial: true) { _, value in

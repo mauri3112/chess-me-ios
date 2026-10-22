@@ -32,8 +32,8 @@ def main():
     parser.add_argument("--release-tag", required=True)
     args = parser.parse_args()
     project = (ROOT / "ios/ChessMe.xcodeproj/project.pbxproj").read_text()
-    versions = set(re.findall(r"MARKETING_VERSION = ([^;]+);", project))
-    builds = set(re.findall(r"CURRENT_PROJECT_VERSION = ([^;]+);", project))
+    versions = set(re.findall(r'"?MARKETING_VERSION"?\s*=\s*"?([^";\s]+)"?\s*;', project))
+    builds = set(re.findall(r'"?CURRENT_PROJECT_VERSION"?\s*=\s*"?([^";\s]+)"?\s*;', project))
     if len(versions) != 1 or len(builds) != 1:
         raise SystemExit("Every native target must use the same version and build number.")
     version, build = versions.pop(), builds.pop()

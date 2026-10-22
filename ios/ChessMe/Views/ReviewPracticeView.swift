@@ -81,7 +81,7 @@ struct ReviewPracticeView: View {
                         ChessBoardView(position: motion.position ?? run.position, perspective: run.solver, selectedSquare: selected,
                                        targets: legalTargets(run), highlightedSquares: motion.lastMove.map { [$0.from, $0.to] } ?? [],
                                        rejectionCount: motion.rejectionCount, successCount: motion.successCount,
-                                       successSquare: motion.successSquare,
+                                       successSquare: motion.successSquare, playsMoveSounds: true,
                                        onSquare: run.isFinished || checking || introPlaying || run.pendingReply != nil ? nil : choose)
                             .accessibilityIdentifier("practice.board")
                     }

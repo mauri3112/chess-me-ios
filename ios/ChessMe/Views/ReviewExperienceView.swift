@@ -27,7 +27,7 @@ struct ReviewLineView: View {
                 let index = min(playback.cursor, proof?.moves.count ?? 0)
                 let previous = index > 0 ? proof.flatMap { try? ChessMove(uci: $0.moves[index - 1]) } : nil
                 ChessBoardView(position: proof?.positions[index] ?? root, perspective: perspective,
-                               highlightedSquares: previous.map { [$0.from, $0.to] } ?? [])
+                               highlightedSquares: previous.map { [$0.from, $0.to] } ?? [], playsMoveSounds: true)
                     .accessibilityIdentifier("review.line.board")
                 HStack(spacing: 6) {
                     BoardIconButton(title: "Restart line", symbol: "backward.end.fill") { playback.seek(0) }

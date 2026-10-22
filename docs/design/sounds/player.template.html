@@ -1,0 +1,99 @@
+<div id="chessme-walnut-player">
+  <h3>Walnut</h3>
+  <div class="viz-controls">
+    <button class="btn btn-primary" type="button" data-sequence>Play sequence</button>
+    <button class="btn" type="button" data-stop>Stop</button>
+  </div>
+  <div class="viz-controls" aria-label="Individual sounds">
+    <button class="btn" type="button" data-cue="move">Move</button>
+    <button class="btn" type="button" data-cue="capture">Capture</button>
+    <button class="btn" type="button" data-cue="check">Check</button>
+    <button class="btn" type="button" data-cue="capture-check">Capture + check</button>
+  </div>
+  <div class="text-small" aria-live="polite" data-status>Ready</div>
+  <script type="application/json" data-audio>__AUDIO_DATA__</script>
+</div>
+<script>
+(() => {
+  const root = document.getElementById('chessme-walnut-player');
+  const status = root.querySelector('[data-status]');
+  const encoded = JSON.parse(root.querySelector('[data-audio]').textContent);
+  const names = { move: ['move-1', 'move-2', 'move-3'], capture: ['capture-1', 'capture-2'], check: ['check'], 'capture-check': ['capture-check'] };
+  const labels = { move: 'Move', capture: 'Capture', check: 'Check', 'capture-check': 'Capture + check' };
+  let context;
+  let buffers;
+  let generation = 0;
+  let sources = [];
+  let timers = [];
+  let moveIndex = 0;
+  let captureIndex = 0;
+  function stop() {
+    generation++;
+    for (const source of sources) { try { source.stop(); } catch (_) {} }
+    sources = [];
+    timers.forEach(clearTimeout);
+    timers = [];
+    status.textContent = 'Ready';
+  }
+  async function ready() {
+    const AudioAPI = window.AudioContext || window.webkitAudioContext;
+    if (!AudioAPI) throw new Error('Audio playback is unavailable in this view.');
+    if (!context) context = new AudioAPI();
+    await context.resume();
+    if (!buffers) {
+      buffers = Promise.all(Object.entries(encoded).map(async ([name, base64]) => {
+        const bytes = Uint8Array.from(atob(base64), c => c.charCodeAt(0));
+        return [name, await context.decodeAudioData(bytes.buffer)];
+      })).then(items => Object.fromEntries(items));
+    }
+    return await buffers;
+  }
+  function schedule(buffer, time) {
+    const source = context.createBufferSource();
+    source.buffer = buffer;
+    source.connect(context.destination);
+    source.start(time);
+    sources.push(source);
+  }
+  async function play(cue) {
+    stop();
+    const ticket = generation;
+    try {
+      const sounds = await ready();
+      if (generation !== ticket) return;
+      let name = names[cue][0];
+      if (cue === 'move') name = names.move[moveIndex++ % names.move.length];
+      if (cue === 'capture') name = names.capture[captureIndex++ % names.capture.length];
+      schedule(sounds[name], context.currentTime);
+      status.textContent = labels[cue];
+      timers.push(setTimeout(() => { status.textContent = 'Ready'; }, 550));
+    } catch (error) { if (ticket === generation) status.textContent = error.message; }
+  }
+  root.querySelectorAll('[data-cue]').forEach(button => button.addEventListener('click', () => play(button.dataset.cue)));
+  root.querySelector('[data-stop]').addEventListener('click', stop);
+  root.querySelector('[data-sequence]').addEventListener('click', async () => {
+    stop();
+    const ticket = generation;
+    try {
+      const sounds = await ready();
+      if (ticket !== generation) return;
+      const sequence = ['move-1', 'move-2', 'move-3', 'capture-1', 'capture-2', 'check', 'capture-check', 'move-1', 'move-2', 'capture-1', 'move-3', 'check'];
+      let offset = .05;
+      for (const name of sequence) {
+        schedule(sounds[name], context.currentTime + offset);
+        const label = name.startsWith('move') ? 'Move' : name.startsWith('capture-') && name !== 'capture-check' ? 'Capture' : labels[name];
+        timers.push(setTimeout(() => { status.textContent = label; }, offset * 1000));
+        offset += sounds[name].duration + .45;
+      }
+      timers.push(setTimeout(() => { status.textContent = 'Ready'; }, offset * 1000));
+    } catch (error) { if (ticket === generation) status.textContent = error.message; }
+  });
+  document.addEventListener('visibilitychange', () => { if (document.hidden) stop(); });
+  window.addEventListener('pagehide', () => {
+    stop();
+    if (context) context.close().catch(() => {});
+    context = undefined;
+    buffers = undefined;
+  });
+})();
+</script>
