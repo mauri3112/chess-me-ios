@@ -197,13 +197,15 @@ struct LichessService: Sendable {
 
     /// Recover just the game belonging to an already-charged downloadable review.
     /// This does not mark any archive window complete or require a new purchase.
-    func reviewedGame(gameID: String, username: String) async throws -> ChessGame {
+    func reviewedGame(gameID: String, username: String, accessToken: String? = nil) async throws -> ChessGame {
         guard gameID.count == 8, gameID.utf8.allSatisfy({ (48...57).contains($0) || (65...90).contains($0) || (97...122).contains($0) }),
               Self.isValidUsername(username) else { throw LichessError.invalidResponse }
         var components = URLComponents(string: "https://lichess.org/game/export/\(gameID)")!
         components.queryItems = [.init(name: "moves", value: "true"), .init(name: "pgnInJson", value: "true"),
                                  .init(name: "clocks", value: "true"), .init(name: "evals", value: "false")]
-        var request = LichessHTTPClient.request(components.url!)
+        // Lichess requires authentication for exports of older, lower-rated
+        // games. A retained paid review must still download after that cutoff.
+        var request = LichessHTTPClient.request(components.url!, token: accessToken)
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         let data = try await client.data(for: request)
         let record = try JSONDecoder().decode(LichessGameRecord.self, from: data)

@@ -334,6 +334,15 @@ struct GameReplayExplorer: View {
             ToolbarItem(placement: .topBarTrailing) {
                 Menu {
                     Toggle("Engine replies", isOn: $engineReplies).accessibilityIdentifier("game.engineReplies")
+                    if let replay {
+                        ShareLink(item: replay.position.fen) { Label("Share position FEN", systemImage: "square.and.arrow.up") }
+                            .accessibilityIdentifier("game.shareFEN")
+                        Button("Copy position FEN", systemImage: "doc.on.doc") { UIPasteboard.general.string = replay.position.fen }
+                            .accessibilityIdentifier("game.copyFEN")
+                        NavigationLink { NotationExportView(game: savedGame, study: replay, snapshotID: snapshotID) } label: {
+                            Label("Export explored line PGN", systemImage: "arrow.triangle.branch")
+                        }.accessibilityIdentifier("game.exportLine")
+                    }
                     Button("Reset variation", systemImage: "arrow.counterclockwise") {
                         if let replay { navigate(replay.index) }; parkedVariation = nil
                     }.disabled(replay?.isVariation != true && parkedVariation == nil).accessibilityIdentifier("game.resetVariation")

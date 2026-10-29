@@ -3,7 +3,7 @@ import ChessMeCore
 
 struct CloudEngineConfiguration: Codable, Equatable, Sendable {
     var engine_id = "stockfish"
-    var depth = 32
+    var depth = 20
     var hash_mb = 256
     var threads = 2
     static func saved() -> Self {
@@ -46,6 +46,36 @@ struct CloudAccount: Sendable, Decodable {
         case quotaUsed = "quota_used", quotaRemaining = "quota_remaining"
         case quotaResetsAt = "quota_resets_at", cachedResultsRetainedHours = "cached_results_retained_hours"
     }
+}
+
+struct CloudMonitoringStatus: Decodable, Sendable {
+    let available: Bool
+    let enabled: Bool
+    let state: String
+    let issue: String?
+    let recovery_limited: Bool
+    let device_count: Int
+    let expires_at: Date?
+
+    var message: String {
+        switch issue {
+        case "quota_exhausted", "quota_exceeded": return "Your monthly allowance is used. New games can be reviewed after it resets."
+        case "subscription_required", "account_mismatch": return "Automatic reviews paused. Check your Pro access to resume."
+        case "unauthorized", "monitor_reconnect_required": return "Reconnect Lichess to resume automatic reviews."
+        case "notification_device_unavailable": return "Reconnect notifications on this iPhone to receive alerts."
+        case .some: return "Automatic reviews are waiting to reconnect. You can still check the queue."
+        case nil:
+            if !available { return "Automatic reviews are not available on this server yet." }
+            return enabled ? "New finished games are reviewed while ChessMe is closed." : "Automatic reviews are off."
+        }
+    }
+}
+
+struct CloudMonitoringRegistration: Encodable, Sendable {
+    let signed_transaction: String
+    let installation_id: UUID
+    let device_token: String
+    let apns_environment: String
 }
 
 struct CloudSubscriptionConnection: Encodable, Sendable {
@@ -256,6 +286,24 @@ struct CloudAnalysisService: Sendable {
 
     func deleteAccount(lichessToken: String) async throws {
         _ = try await request(path: "v1/cloud/account", method: "DELETE", token: lichessToken)
+    }
+
+    func monitoring(lichessToken: String) async throws -> CloudMonitoringStatus {
+        try Self.decoder().decode(CloudMonitoringStatus.self, from: await request(path: "v1/cloud/monitoring", method: "GET", token: lichessToken))
+    }
+
+    func enableMonitoring(_ body: CloudMonitoringRegistration, lichessToken: String) async throws -> CloudMonitoringStatus {
+        try Self.decoder().decode(CloudMonitoringStatus.self, from: await request(path: "v1/cloud/monitoring", method: "POST", token: lichessToken, body: JSONEncoder().encode(body)))
+    }
+
+    func disableMonitoring(lichessToken: String) async throws -> CloudMonitoringStatus {
+        try Self.decoder().decode(CloudMonitoringStatus.self, from: await request(path: "v1/cloud/monitoring", method: "DELETE", token: lichessToken))
+    }
+
+    func registerPushDevice(token: String, installation: UUID, environment: String, lichessToken: String) async throws -> CloudMonitoringStatus {
+        struct Body: Encodable { let installation_id: UUID; let device_token: String; let apns_environment: String }
+        let body = Body(installation_id: installation, device_token: token, apns_environment: environment)
+        return try Self.decoder().decode(CloudMonitoringStatus.self, from: await request(path: "v1/cloud/monitoring/device", method: "POST", token: lichessToken, body: JSONEncoder().encode(body)))
     }
 
     func enqueue(game: ChessGame, credential: CloudSubscriptionCredential, lichessToken: String,

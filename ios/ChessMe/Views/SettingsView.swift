@@ -104,17 +104,16 @@ struct SettingsView: View {
             .navigationTitle("Settings").navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Done") { dismiss() }.accessibilityIdentifier("settings.done") } }
             .confirmationDialog(model.isDemo ? "Clear sample games?" : "Delete your local library?", isPresented: $deleteLocal, titleVisibility: .visible) {
-                Button(model.isDemo ? "Clear samples and practice" : "Delete games and practice", role: .destructive) { model.deleteLocalData() }
+                Button(model.isDemo ? "Clear samples and practice" : "Delete games and practice", role: .destructive) { Task { if model.isDemo || !model.hasCloudConsent { model.deleteLocalData() } else if await model.stopAutomaticCloudReviews() { model.deleteLocalData() } } }
             } message: { Text(model.isDemo ? "This clears the demonstration games and practice. Your saved library remains available when you leave sample mode." : "This erases imported games, device analysis and practice progress on this iPhone. It does not cancel your subscription or delete Lichess games.") }
             .confirmationDialog("Disconnect Lichess?", isPresented: $disconnect, titleVisibility: .visible) {
-                Button("Disconnect and keep local lessons") { Task { await authentication.disconnect() } }
+                Button("Disconnect and keep local lessons") { Task { await model.disconnectLichess() } }
                 if !model.isDemo && model.canSaveLibrary {
                     Button("Disconnect and delete this account's local games", role: .destructive) {
-                        model.removeGamesForConnectedAccount()
-                        Task { await authentication.disconnect() }
+                        Task { await model.disconnectLichess(deleteGames: true) }
                     }
                 }
-            } message: { Text("The saved read token is removed and future sync stops. chess-me also attempts to revoke access at Lichess.") }
+            } message: { Text("Automatic server reviews stop and the saved read token is removed. ChessMe also attempts to revoke access at Lichess. If the server is offline, reconnect before disconnecting.") }
             .confirmationDialog("Delete cloud review history?", isPresented: $deleteCloud, titleVisibility: .visible) {
                 Button("Delete cloud history", role: .destructive) {
                     Task {
@@ -144,7 +143,7 @@ struct PrivacyView: View {
                     Text("Your games,\nyour choice.").font(ChessMeStyle.title(36)).foregroundStyle(ChessMeStyle.ink)
                     paragraph("On your device", "chess-me stores imported completed games, analysis and practice progress in the app's local storage. Your Lichess read token is kept in Keychain. Device backups follow your iPhone's settings.")
                     paragraph("Lichess connection", "Connecting opens Lichess authorization. The app reads your identity and completed public standard games. Public username import does not verify account ownership. You can disconnect and delete local records in Settings.")
-                    paragraph("Optional cloud review", "You choose whether to connect the cloud account and request deeper reviews. The service receives your Lichess read token for that request, verifies subscription access and fetches the selected completed game. It does not store your token. Completed reviews stay on the server until the app confirms they were saved on this iPhone, then remain available for 24 hours. Anonymous search results from public games may be reused to speed up other reviews. You can delete your cloud reviews in Settings.")
+                    paragraph("Optional cloud review", "You choose whether to connect the cloud account and request deeper reviews. The service receives your Lichess read token for that request, verifies subscription access and fetches the selected completed game. Manual reviews do not store your token. If you enable automatic reviews, the server encrypts and retains your Lichess read credential, a purchase reference and notification registration for up to 30 days per enrollment. It watches game completion events, verifies current subscription access and queues new finished standard games within your allowance. Turning automatic reviews off, disconnecting or deleting cloud history removes these credentials and notification registrations. Apple delivers queued and ready alerts; delivery is not guaranteed. Completed reviews stay on the server until the app confirms they were saved on this iPhone, then remain available for 24 hours. Anonymous search results from public games may be reused to speed up other reviews. You can delete your cloud reviews in Settings.")
                     paragraph("Related puzzles", "After a game review, chess-me can send estimated tactical themes, a target puzzle level and public puzzle IDs to its server. Your game moves, player names and Lichess token are not sent for matching. The server returns public Lichess puzzles. Matches and attempts are saved on this iPhone. Turn automatic matching off in Settings or delete the local library to clear them.")
                     paragraph("Subscription and usage", "Apple processes purchases. The cloud service retains limited account and purchase-binding information and usage totals to enforce the monthly allowance and prevent duplicate charges. Deleting review history does not reset current-month usage or cancel your subscription.")
                     paragraph("This first version", "The app has no advertising or third-party analytics. The developer must publish the production operator's contact details and final privacy policy before public release.")

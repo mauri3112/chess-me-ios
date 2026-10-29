@@ -17,6 +17,7 @@ final class LichessAuthentication: NSObject, ObservableObject, ASWebAuthenticati
         let accessToken: String
         let account: LichessAccount
         let expiresAt: Date
+        var monitorsGames: Bool? = nil
     }
     private struct TokenResponse: Decodable {
         let access_token: String
@@ -58,7 +59,7 @@ final class LichessAuthentication: NSObject, ObservableObject, ASWebAuthenticati
             let profile = try await fetchAccount(token: token)
             guard credential?.accessToken == token else { return }
             if let credential {
-                let refreshed = StoredCredential(accessToken: token, account: profile, expiresAt: credential.expiresAt)
+                let refreshed = StoredCredential(accessToken: token, account: profile, expiresAt: credential.expiresAt, monitorsGames: credential.monitorsGames)
                 try keychain.save(JSONEncoder().encode(refreshed), for: credentialKey)
                 self.credential = refreshed
             }
@@ -79,7 +80,9 @@ final class LichessAuthentication: NSObject, ObservableObject, ASWebAuthenticati
         return credential.accessToken
     }
 
-    func connect() async throws {
+    var supportsGameEvents: Bool { credential?.monitorsGames == true }
+
+    func connect(forMonitoring: Bool = false) async throws {
         guard !isConnecting else { throw LichessError.busy }
         try Task.checkCancellation()
         isConnecting = true
@@ -102,6 +105,9 @@ final class LichessAuthentication: NSObject, ObservableObject, ASWebAuthenticati
                 .init(name: "code_challenge_method", value: "S256"), .init(name: "code_challenge", value: challenge),
                 .init(name: "state", value: state)
             ]
+            // Lichess's read-only event permission includes gameFinish. Never ask
+            // for board:play or bot:play; ChessMe does not play moves.
+            if forMonitoring { authorization.queryItems?.append(.init(name: "scope", value: "challenge:read")) }
             let callback = try await authenticate(at: authorization.url!)
             try Task.checkCancellation()
             let code = try Self.validateCallback(callback, redirectURI: redirectURI, state: state)
@@ -121,7 +127,7 @@ final class LichessAuthentication: NSObject, ObservableObject, ASWebAuthenticati
                 try Task.checkCancellation()
                 guard connectionID == attemptID else { throw CancellationError() }
                 let saved = StoredCredential(accessToken: response.access_token, account: profile,
-                                             expiresAt: Date().addingTimeInterval(Double(response.expires_in)))
+                                             expiresAt: Date().addingTimeInterval(Double(response.expires_in)), monitorsGames: forMonitoring)
                 try keychain.save(JSONEncoder().encode(saved), for: credentialKey)
                 credential = saved
                 account = profile

@@ -16,12 +16,22 @@ struct LibraryView: View {
     @State private var savedOnly = false
     @State private var reviewedFilter: ReviewedGameFilter = .all
     @State private var speedFilter: GameSpeedFilter = .all
+    @State private var search = ""
+    @State private var side: Side?
+    @State private var result: PlayerGameOutcome?
+    @State private var archiveEntries: [String: GameArchiveEntry] = [:]
+    @State private var indexing = false
+    @FocusState private var searchFocused: Bool
     @State private var schedule: DeviceAnalysisSchedule?
     @ScaledMetric(relativeTo: .subheadline) private var filterHeight: CGFloat = 44
     private var games: [ChessGame] {
         let candidates = savedOnly ? model.favoriteGames : model.windowGames
         let reviews = model.library.analyses + (model.library.analysisHistory ?? []) + (model.library.localAnalysisJobs ?? []).compactMap(\.checkpoint)
-        return candidates.filter { speedFilter.includes($0) && reviewedFilter.includes(game: $0, reviews: reviews) }
+        return candidates.filter {
+            guard speedFilter.includes($0), reviewedFilter.includes(game: $0, reviews: reviews) else { return false }
+            guard !search.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || side != nil || result != nil else { return true }
+            return archiveEntries[$0.id]?.matches(search, side: side, result: result) == true
+        }
     }
     @Environment(\.chessReduceMotion) private var reduceMotion
     var body: some View {
@@ -29,10 +39,20 @@ struct LibraryView: View {
             LazyVStack(alignment: .leading, spacing: 20) {
                 BrandHeader(title: "Games", tab: .games)
                 SampleNotice()
-                NavigationLink { SavedReviewLinesView() } label: {
-                    Label("Saved lines", systemImage: "arrow.triangle.branch")
-                        .font(.subheadline.weight(.semibold)).frame(minHeight: 44)
-                }.accessibilityIdentifier("games.savedLines")
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: 20) { studyLinks }
+                    VStack(alignment: .leading, spacing: 4) { studyLinks }
+                }
+                HStack {
+                    Image(systemName: "magnifyingglass").foregroundStyle(ChessMeStyle.muted)
+                    TextField("Opponent, opening, or ECO", text: $search)
+                        .autocorrectionDisabled().submitLabel(.search).focused($searchFocused)
+                        .onSubmit { searchFocused = false }.accessibilityIdentifier("games.search")
+                    if !search.isEmpty {
+                        Button { search = "" } label: { Image(systemName: "xmark.circle.fill") }
+                            .accessibilityLabel("Clear search").frame(width: 44, height: 44)
+                    }
+                }.padding(.leading, 12).frame(minHeight: 44).background(.white, in: RoundedRectangle(cornerRadius: 12))
                 HStack {
                     Menu {
                         Button("Queue for night analysis", systemImage: "moon.fill") { schedule = .night }
@@ -64,10 +84,33 @@ struct LibraryView: View {
                     }
                 }.frame(height: filterHeight)
                 GameSpeedMenu(selection: $speedFilter)
+                HStack(spacing: 16) {
+                    Menu {
+                        Button("Both colors") { side = nil }
+                        Button("White") { side = .white }
+                        Button("Black") { side = .black }
+                    } label: {
+                        Label(side?.title ?? "Both colors", systemImage: "circle.lefthalf.filled")
+                    }.accessibilityIdentifier("games.color")
+                    Menu {
+                        Button("All results") { result = nil }
+                        Button("Won") { result = .won }
+                        Button("Drawn") { result = .draw }
+                        Button("Lost") { result = .lost }
+                    } label: {
+                        Label(result == .won ? "Won" : result == .draw ? "Drawn" : result == .lost ? "Lost" : "All results", systemImage: "flag")
+                    }.accessibilityIdentifier("games.resultFilter")
+                }.font(.subheadline).frame(minHeight: 44)
+                if indexing && (!search.isEmpty || result != nil || side != nil) {
+                    ProgressView("Reading saved game details…").font(.caption)
+                }
                 if games.isEmpty {
-                    Text(reviewedFilter != .all || speedFilter != .all ? (savedOnly ? "No saved games match these filters." : "No games match these filters in this period.") : savedOnly ? "Save a game using the heart in its review." : "Your completed games will appear here after import.")
+                    Text(hasFilters ? (savedOnly ? "No saved games match these filters." : "No games match these filters in this period.") : savedOnly ? "Save a game using the heart in its review." : "Your completed games will appear here after import.")
                         .font(.subheadline).foregroundStyle(ChessMeStyle.muted)
-                    if !savedOnly && reviewedFilter == .all && speedFilter == .all {
+                    if hasFilters {
+                        Button("Clear filters") { search = ""; result = nil; side = nil; reviewedFilter = .all; speedFilter = .all }
+                            .frame(minHeight: 44).accessibilityIdentifier("games.clearFilters")
+                    } else if !savedOnly {
                         PrimaryButton(title: "Import games", symbol: "arrow.down") { model.showConnection = true }
                     }
                 }
@@ -89,6 +132,9 @@ struct LibraryView: View {
                                     Text("\(analysis.findings.count) key moments")
                                         .font(.caption).foregroundStyle(ChessMeStyle.muted)
                                 }
+                                if let opening = archiveEntries[game.id]?.opening {
+                                    Text(opening).font(.caption).foregroundStyle(ChessMeStyle.muted).lineLimit(1)
+                                }
                             }
                             Spacer(minLength: 0)
                             GameAnalysisIndicator(game: game)
@@ -107,6 +153,35 @@ struct LibraryView: View {
         }.background(ChessMeStyle.paper).toolbar(.hidden, for: .navigationBar)
             .accessibilityIdentifier("games.scroll")
             .sheet(item: $schedule) { mode in GameAnalysisSelectionView(schedule: mode, games: games) }
+            .task(id: model.library.games) {
+                indexing = true
+                let savedGames = model.library.games
+                let work = Task.detached(priority: .utility) { () -> [String: GameArchiveEntry] in
+                    var entries: [String: GameArchiveEntry] = [:]
+                    for game in savedGames {
+                        if Task.isCancelled { break }
+                        let opening = (try? GameReplay(game: game)).flatMap { OpeningBook.shared.line(in: $0).opening }
+                        entries[game.id] = GameArchiveEntry(game: game, opening: opening)
+                    }
+                    return entries
+                }
+                let entries = await withTaskCancellationHandler(operation: { await work.value }, onCancel: { work.cancel() })
+                guard !Task.isCancelled else { return }
+                archiveEntries = entries; indexing = false
+            }
+    }
+
+    private var hasFilters: Bool { reviewedFilter != .all || speedFilter != .all || !search.isEmpty || side != nil || result != nil }
+
+    @ViewBuilder private var studyLinks: some View {
+        NavigationLink { SavedReviewLinesView() } label: {
+            Label("Saved lines", systemImage: "arrow.triangle.branch")
+                .font(.subheadline.weight(.semibold)).frame(minHeight: 44)
+        }.accessibilityIdentifier("games.savedLines")
+        NavigationLink { InsightsView() } label: {
+            Label("Insights", systemImage: "chart.bar")
+                .font(.subheadline.weight(.semibold)).frame(minHeight: 44)
+        }.accessibilityIdentifier("games.insights")
     }
 
     private var reviewedMenu: some View {

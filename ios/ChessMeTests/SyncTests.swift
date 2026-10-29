@@ -4,6 +4,27 @@ import ChessMeCore
 @testable import ChessMe
 
 final class SyncTests: XCTestCase {
+    func testRetainedReviewCanAuthenticateAnOldGameExportAndStillChecksOwnership() async throws {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [SyncProtocol.self]
+        let service = LichessService(client: LichessHTTPClient(session: URLSession(configuration: configuration), gate: LichessRequestGate()))
+        var record = try XCTUnwrap(JSONSerialization.jsonObject(with: Self.clockExport()) as? [String: Any])
+        record["createdAt"] = Int64(Date().addingTimeInterval(-30 * 86400).timeIntervalSince1970 * 1000)
+        let oldGame = try JSONSerialization.data(withJSONObject: record)
+        SyncProtocol.handler = { request in
+            XCTAssertEqual(request.url?.host, "lichess.org")
+            XCTAssertEqual(request.url?.path, "/game/export/clock123")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer test-token")
+            return (200, oldGame)
+        }
+        let game = try await service.reviewedGame(gameID: "clock123", username: "Learner", accessToken: "test-token")
+        XCTAssertEqual(game.id, "clock123")
+        do {
+            _ = try await service.reviewedGame(gameID: "clock123", username: "SomeoneElse", accessToken: "test-token")
+            XCTFail("An authenticated export must still belong to the connected account")
+        } catch { }
+    }
+
     func testSpeedFilterIsSentToProviderAndRetainedOnGames() async throws {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [SyncProtocol.self]

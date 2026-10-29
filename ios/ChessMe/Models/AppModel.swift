@@ -22,6 +22,12 @@ final class AppModel: ObservableObject {
     @Published var cloudIsRefreshing = false
     @Published var cloudDownloadError: String?
     @Published var cloudLastRefreshed: Date?
+    @Published var cloudMonitoring: CloudMonitoringStatus?
+    @Published var monitoringBusy = false
+    @Published var monitoringError: String?
+    @Published var notificationGame: ChessGame?
+    var monitoringAccountID: String?
+    var monitoringRefreshAt = Date.distantPast
     var cloudPollingSchedule = CloudPollingSchedule()
     @Published var cloudBatchMessage: String?
     @Published var cloudBatchSubmitting = false
@@ -744,10 +750,13 @@ final class AppModel: ObservableObject {
         cancelPuzzleMatches(); endSession(); resetCloudAccess()
         syncMessage = nil
         if library.isDemo { library = LibrarySnapshot(isDemo: true); notice = "Sample games cleared. Your saved library is unchanged."; return }
-        if usesEphemeralLibrary { library = LibrarySnapshot(); return }
+        if usesEphemeralLibrary {
+            library = LibrarySnapshot(); return
+        }
         do {
             let localStorage = try storage ?? recoveryStorage ?? LocalLibrary()
             try localStorage.delete()
+            UserDefaults.standard.removeObject(forKey: FundamentalsProgress.preferenceKey)
             storage = localStorage
             recoveryStorage = nil
             storageInitializationFailed = false
@@ -931,7 +940,8 @@ final class AppModel: ObservableObject {
                 guard !Task.isCancelled, authentication.account?.username.lowercased() == accountID, !isDemo, hasCloudConsent else { return }
                 do {
                     if job.result != nil && !library.games.contains(where: { $0.id == job.game_id }) {
-                        let game = try await lichessService.reviewedGame(gameID: job.game_id, username: accountID)
+                        let game = try await lichessService.reviewedGame(gameID: job.game_id, username: accountID,
+                            accessToken: authentication.accessToken())
                         guard authentication.account?.username.lowercased() == accountID, !isDemo, canSaveLibrary else { return }
                         if !library.games.contains(where: { $0.id == game.id }) { library.games.append(game) }
                     }
@@ -1025,6 +1035,8 @@ final class AppModel: ObservableObject {
     }
 
     func clearCloudReviewReferences(accountID: String) {
+        cloudMonitoring = nil
+        monitoringAccountID = nil
         library.cloudReviews?.removeAll { $0.accountID == accountID.lowercased() }
         library.cloudReviewAccounts?.removeAll { $0 == accountID.lowercased() }
         library.cloudEnabledAccounts?.removeAll { $0 == accountID.lowercased() }

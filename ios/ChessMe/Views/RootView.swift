@@ -8,6 +8,7 @@ struct RootView: View {
     @EnvironmentObject private var model: AppModel
     @EnvironmentObject private var subscriptions: SubscriptionStore
     @EnvironmentObject private var authentication: LichessAuthentication
+    @EnvironmentObject private var notifications: GameNotifications
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @AppStorage(ChessBoardDesign.preferenceKey) private var storedDesign = ChessBoardDesign.classic.rawValue
@@ -29,6 +30,18 @@ struct RootView: View {
         .sheet(isPresented: $model.showConnection) { ConnectionView() }
         .sheet(isPresented: $model.showPaywall, onDismiss: { model.applyRequestedProWindow() }) { PaywallView() }
         .sheet(isPresented: $model.showCloudSetup) { CloudSetupView() }
+        .sheet(item: $model.notificationGame) { game in
+            NavigationStack {
+                GameDetailView(game: game)
+                    .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Done") { model.notificationGame = nil } } }
+            }
+        }
+        .task(id: notifications.pendingRoute) {
+            guard let route = notifications.pendingRoute else { return }
+            await model.openCloudNotification(route)
+            guard !Task.isCancelled else { return }
+            notifications.consume(route)
+        }
         .onChange(of: subscriptions.isPro) { _, isPro in
             model.cloudAccessVerified = false
             if !isPro { model.selectedWindow = .day }
@@ -62,8 +75,10 @@ struct RootView: View {
         }
         .task(id: "\(model.cloudQueueRefreshID):\(scenePhase == .active)") {
             guard scenePhase == .active else { return }
+            await model.refreshMonitoring(renew: true)
             while !Task.isCancelled {
                 await model.refreshCloudReviews(automatically: true)
+                await model.refreshMonitoring()
                 do { try await Task.sleep(for: .seconds(5)) } catch { return }
             }
         }
@@ -258,6 +273,11 @@ struct ReviewView: View {
             NavigationLink { OpeningCoachView() } label: {
                 Label("Opening practice", systemImage: "flag.checkered").frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
             }.accessibilityIdentifier("today.openings")
+            Link(destination: URL(string: "https://lichess.org/")!) {
+                Label("Play on Lichess", systemImage: "arrow.up.right.square")
+                    .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+            }.accessibilityIdentifier("today.playLichess")
+                .accessibilityHint("Opens Lichess to play. Return here to review completed games.")
         }.font(.subheadline.weight(.semibold)).foregroundStyle(ChessMeStyle.green)
     }
 

@@ -93,11 +93,19 @@ struct SavedReviewLineView: View {
                     Text(line.title).font(ChessMeStyle.title(26))
                     Text("Your saved variation · \(line.savedAt.formatted(date: .abbreviated, time: .omitted))")
                         .font(.caption).foregroundStyle(ChessMeStyle.muted)
+                    NavigationLink {
+                        SavedLineRehearsalView(lineID: line.id)
+                    } label: { Label("Rehearse this saved line", systemImage: "brain.head.profile") }
+                    .accessibilityIdentifier("lines.rehearse")
+                    NavigationLink { NotationExportView(game: line.replayGame(), savedLine: line) } label: {
+                        Label("Export saved line PGN", systemImage: "square.and.arrow.up")
+                    }.accessibilityIdentifier("lines.export")
                     ReviewLineView(fen: line.positionFEN, moves: line.moves, perspective: line.playerSide,
                                    label: "Saved moves · not automatically a verified recommendation")
                     NavigationLink {
                         GameReplayExplorer(game: line.replayGame(), initialPly: line.prefix.count, useStoredSnapshot: true, snapshotID: line.id)
                     } label: { Label("Explore this saved position", systemImage: "arrow.triangle.branch") }
+                    .accessibilityIdentifier("lines.explore")
                     if let game = model.library.games.first(where: { $0.id == line.gameID }) {
                         NavigationLink("Open source game") { GameDetailView(game: game) }
                     } else { Text("The source game is unavailable. The stored position and line remain usable.").font(.caption) }

@@ -11,10 +11,11 @@
     <key>CFBundlePackageType</key><string>APPL</string>
     <key>CFBundleShortVersionString</key><string>$(MARKETING_VERSION)</string>
     <key>CFBundleVersion</key><string>$(CURRENT_PROJECT_VERSION)</string>
-    <key>ChessMeSourceCodeURL</key><string>https://github.com/mauri3112/chess-me-ios/tree/ios-0.2.0-build32</string>
+    <key>ChessMeSourceCodeURL</key><string>https://github.com/mauri3112/chess-me-ios/tree/ios-0.2.0-build33</string>
     <key>ChessMeLichessClientID</key><string>chess-me-ios</string>
     <key>ChessMeCloudBaseURL</key><string>https://api.trigrd.tech/chessme-sandbox</string>
     <key>ChessMeCloudEnvironment</key><string>Sandbox</string>
+    <key>ChessMePushEnvironment</key><string>$(APS_ENVIRONMENT)</string>
     <key>ChessMePuzzleBaseURL</key><string>https://api.trigrd.tech/chessme</string>
     <key>ChessMeSubscriptionProductIDs</key>
     <array><string>com.chessme.pro.monthly</string><string>com.chessme.pro.yearly</string></array>
@@ -24,6 +25,16 @@
         <key>CFBundleURLSchemes</key><array><string>com.chessme.app</string></array>
     </dict></array>
     <key>ITSAppUsesNonExemptEncryption</key><false/>
+    <key>UTExportedTypeDeclarations</key>
+    <array><dict>
+        <key>UTTypeIdentifier</key><string>com.chessme.pgn</string>
+        <key>UTTypeDescription</key><string>Portable chess game</string>
+        <key>UTTypeConformsTo</key><array><string>public.plain-text</string></array>
+        <key>UTTypeTagSpecification</key><dict>
+            <key>public.filename-extension</key><array><string>pgn</string></array>
+            <key>public.mime-type</key><string>application/x-chess-pgn</string>
+        </dict>
+    </dict></array>
     <key>LSRequiresIPhoneOS</key><true/>
     <key>UIApplicationSceneManifest</key><dict>
         <key>UIApplicationSupportsMultipleScenes</key><false/>

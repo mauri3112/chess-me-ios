@@ -39,15 +39,24 @@ struct PracticeView: View {
                         }
                     }
                 }
-                NavigationLink { PuzzlesView() } label: {
-                    destination("Puzzles", detail: "Find a new challenge", symbol: "puzzlepiece.extension")
+                NavigationLink { PuzzleTrainingView() } label: {
+                    destination("Puzzles", detail: "Choose a theme or retry saved puzzles", symbol: "puzzlepiece.extension")
                 }.accessibilityIdentifier("practice.puzzles")
+                NavigationLink { FundamentalsView() } label: {
+                    destination("Fundamentals", detail: "Checkmate patterns and promotion", symbol: "graduationcap")
+                }.accessibilityIdentifier("practice.fundamentals")
                 NavigationLink { FavoritesView() } label: {
                     destination("Saved positions", detail: "Lessons and puzzles you've kept", symbol: "heart")
                 }.accessibilityIdentifier("practice.saved")
                 NavigationLink { OpeningCoachView() } label: {
                     destination("Opening practice", detail: "Learn from repeated early decisions", symbol: "flag.checkered")
                 }.accessibilityIdentifier("openings.open")
+                NavigationLink { SavedReviewLinesView() } label: {
+                    destination("Rehearse saved lines", detail: "Recall your chosen variations", symbol: "arrow.triangle.branch")
+                }.accessibilityIdentifier("practice.lines")
+                NavigationLink { AnalysisWorkspaceView() } label: {
+                    destination("Analysis board", detail: "Explore moves or paste a position", symbol: "square.grid.3x3")
+                }.accessibilityIdentifier("practice.analysis")
                 Text("Your lessons").font(ChessMeStyle.title(22))
                 Picker("Lesson status", selection: $filter) {
                     ForEach(["All", "Ready", "Later", "Dismissed"], id: \.self) { Text($0).tag($0) }

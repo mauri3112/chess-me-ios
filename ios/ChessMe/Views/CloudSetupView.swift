@@ -9,6 +9,7 @@ struct CloudSetupView: View {
     @State private var showPlans = false
     @State private var chooseGames = false
     @State private var error: String?
+    @State private var enableMonitoring = false
 
     var body: some View {
         NavigationStack {
@@ -16,7 +17,7 @@ struct CloudSetupView: View {
                 VStack(alignment: .leading, spacing: 24) {
                     Text(model.cloudIsReady ? "Cloud reviews are ready" : "Set up deeper reviews")
                         .font(ChessMeStyle.title(30))
-                    Text("Stockfish reviews games you choose. Saved results work offline.")
+                    Text("Choose games for Stockfish review or review new games automatically. Saved results work offline.")
                         .font(.subheadline).foregroundStyle(ChessMeStyle.muted)
                     if model.cloud.usesSandbox {
                         Label("TestFlight · Apple Sandbox", systemImage: "testtube.2")
@@ -60,18 +61,21 @@ struct CloudSetupView: View {
                         Button("Resume remaining submissions") { model.startCloudBatch(gameIDs: model.cloudBatchRemaining, resuming: true) }
                             .disabled(!model.cloudIsReady || model.isBusy || model.cloudBatchRemaining.count > (model.cloudAccount?.quotaRemaining ?? 0))
                     }
+                    if model.hasCloudConsent && !model.isDemo { automaticReviews }
                     if model.cloudIsReady || !model.displayedCloudReviews.isEmpty { activity }
                     DisclosureGroup("Connection & review details") {
                         VStack(alignment: .leading, spacing: 16) {
                             if let account = authentication.account { Text("Lichess · \(account.username)").font(.subheadline) }
                             if model.hasCloudConsent {
-                                Toggle("Allow cloud account connection", isOn: Binding(get: { model.hasCloudConsent }, set: { if !$0 { model.revokeCloudConnection() } }))
+                                Toggle("Allow cloud account connection", isOn: Binding(get: { model.hasCloudConsent }, set: { if !$0 { Task { await model.revokeCloudConnection() } } }))
                                     .accessibilityIdentifier("cloud.consent")
                                 Button("Check cloud connection") { Task { await model.connectCloudAccount() } }
                                     .disabled(model.cloudIsConnecting).accessibilityIdentifier("cloud.checkConnection")
                             }
                             if model.cloudAccessVerified && subscriptions.isPro {
-                                Toggle("Use Stockfish cloud reviews", isOn: Binding(get: { model.cloudEnabled }, set: model.setCloudEnabled))
+                                Toggle("Use Stockfish cloud reviews", isOn: Binding(get: { model.cloudEnabled }, set: { enabled in
+                                    Task { if enabled { model.setCloudEnabled(true) } else if await model.stopAutomaticCloudReviews() { model.setCloudEnabled(false) } }
+                                }))
                                     .accessibilityIdentifier("cloud.enable")
                             }
                             Button("Restore purchases") { restore() }.disabled(model.cloudIsConnecting).accessibilityIdentifier("cloud.restore")
@@ -90,9 +94,45 @@ struct CloudSetupView: View {
                     guard !ProcessInfo.processInfo.arguments.contains("--ui-testing") else { return }
                     await model.connectCloudAccount()
                     await model.refreshCloudReviews()
+                    await model.refreshMonitoring(renew: true)
+                }
+                .confirmationDialog("Review new games automatically?", isPresented: $enableMonitoring, titleVisibility: .visible) {
+                    Button("Enable automatic reviews") { Task { await model.enableAutomaticCloudReviews() } }
+                } message: {
+                    Text("ChessMe will keep an encrypted Lichess read credential and purchase reference on its server to detect finished games and check Pro access. Each accepted review uses one of your 30 monthly reviews. You will receive queued and ready notifications. Monitoring expires after 30 days unless renewed and stops when you turn it off or disconnect.")
                 }
                 .onChange(of: showPlans) { _, showing in if !showing { Task { await model.connectCloudAccount() } } }
         }.disclosureGroupStyle(FullRowDisclosureStyle())
+    }
+
+    private var automaticReviews: some View {
+        PaperCard {
+            VStack(alignment: .leading, spacing: 12) {
+                Text("After every game").font(ChessMeStyle.title(25))
+                Text(model.cloudMonitoring?.message ?? "Check automatic reviews to see availability.")
+                    .font(.subheadline).foregroundStyle(ChessMeStyle.muted)
+                if model.cloudMonitoring?.enabled == true {
+                    Button("Turn off automatic reviews", role: .destructive) { Task { await model.stopAutomaticCloudReviews() } }
+                        .accessibilityIdentifier("cloud.monitoring.disable")
+                    if let expiry = model.cloudMonitoring?.expires_at {
+                        Text("Enabled until \(expiry.formatted(date: .abbreviated, time: .omitted)).")
+                            .font(.caption).foregroundStyle(ChessMeStyle.muted)
+                        Button("Renew for 30 days") { enableMonitoring = true }.disabled(!model.cloudIsReady)
+                    }
+                } else {
+                    Button("Enable automatic reviews & notifications") { enableMonitoring = true }
+                        .disabled(!model.cloudIsReady || model.cloudMonitoring?.available != true)
+                        .accessibilityIdentifier("cloud.monitoring.enable")
+                }
+                if model.cloudMonitoring?.recovery_limited == true {
+                    Text("Recovery checked a limited recent history. Choose older missed games manually.").font(.caption)
+                }
+                if let message = model.monitoringError { Text(message).font(.footnote).accessibilityIdentifier("cloud.monitoring.error") }
+                if model.monitoringBusy { ProgressView() }
+                Text("Finished standard Lichess games only. New games use your existing cloud allowance. No allowance is used when the queue cannot accept a game.")
+                    .font(.caption).foregroundStyle(ChessMeStyle.muted)
+            }.disabled(model.monitoringBusy)
+        }
     }
 
     @ViewBuilder private var nextStep: some View {
@@ -114,7 +154,7 @@ struct CloudSetupView: View {
             }.disabled(authentication.isConnecting).accessibilityIdentifier("cloud.connectLichess")
         } else if !model.hasCloudConsent {
             Text("Allow cloud connection").font(ChessMeStyle.title(23)).accessibilityIdentifier("cloud.nextStep")
-            Text("ChessMe sends your Lichess read token to its server to identify you and fetch games you select. The server does not store your token.")
+            Text("ChessMe sends your Lichess read token to its server to identify you and fetch games you select. Manual reviews do not store your token. Automatic reviews have a separate opt-in for encrypted credential storage.")
                 .font(.subheadline).foregroundStyle(ChessMeStyle.muted)
             PrimaryButton(title: "Allow cloud connection", symbol: "cloud") { Task { await model.allowCloudConnection() } }
                 .disabled(model.cloudIsConnecting).accessibilityIdentifier("cloud.allowConnection")

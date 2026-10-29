@@ -57,6 +57,10 @@ extension AppModel {
         return "Choose finished games for deeper Stockfish review."
     }
     func resetCloudAccess() {
+        cloudMonitoring = nil
+        monitoringAccountID = nil
+        monitoringRefreshAt = .distantPast
+        notificationGame = nil
         cloudBatchTask?.cancel()
         cloudAccount = nil
         cloudAccountID = nil
@@ -75,8 +79,9 @@ extension AppModel {
         guard persist() else { return }
         await connectCloudAccount()
     }
-    func revokeCloudConnection() {
+    func revokeCloudConnection() async {
         guard let id = authentication.account?.username.lowercased() else { return }
+        guard await stopAutomaticCloudReviews() else { return }
         updateLibrary { snapshot in
             snapshot.cloudReviewAccounts?.removeAll { $0 == id }
             snapshot.cloudEnabledAccounts?.removeAll { $0 == id }

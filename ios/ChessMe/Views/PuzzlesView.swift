@@ -55,6 +55,7 @@ struct PuzzlesView: View {
 
 struct PuzzleRow: View {
     let puzzle: TrainingPuzzle
+    var isCataloguePreview = false
     @EnvironmentObject private var model: AppModel
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
@@ -63,8 +64,9 @@ struct PuzzleRow: View {
                     ChessBoardView(position: (try? ChessPosition(fen: puzzle.positionFEN)) ?? .initial)
                         .frame(width: 68, height: 68).accessibilityHidden(true)
                     VStack(alignment: .leading, spacing: 5) {
-                        Text("Level \(puzzle.rating) · Lichess").font(.subheadline.weight(.semibold))
-                        if model.isDemo { Text("Sample puzzle").font(.caption).foregroundStyle(ChessMeStyle.muted) }
+                        Text("Lichess rating \(puzzle.rating)").font(.subheadline.weight(.semibold))
+                        if isCataloguePreview { Text("Catalogue preview · CC0").font(.caption).foregroundStyle(ChessMeStyle.muted) }
+                        if model.isDemo && !isCataloguePreview && DemoContent.puzzleExamples.contains(where: { $0.id == puzzle.id }) { Text("Sample puzzle").font(.caption).foregroundStyle(ChessMeStyle.muted) }
                         if let related = model.recommendation(for: puzzle) {
                             Text("Related to \(related.game.label)").font(.caption).lineLimit(2)
                             Text(related.themes.map(PuzzleTheme.title).joined(separator: " · ")).font(.caption).foregroundStyle(ChessMeStyle.green)

@@ -177,6 +177,8 @@ extension AppModel {
             throw ChessError.invalidMove("This exercise uses earlier evidence. Open the current lesson from Practice or its source review.")
         }
         let targetID = linkedTargetID ?? target?.id ?? finding.id
+        // Catalogue previews disappear on relaunch, so direct puzzles need a retained resume route.
+        let needsStandaloneRoute = returnGameID != nil || parentRunID != nil || (sessionID == nil && linkedTargetID == nil)
         guard puzzle != nil || target != nil else { throw ChessError.invalidMove("The source lesson is no longer retained. Return to Games and open a supported current review.") }
         if let resumeRunID, var pinned = reviewState.runs.first(where: { $0.id == resumeRunID && $0.isConsistent }),
            pinned.targetID == targetID, pinned.attempt.puzzleID == puzzle?.id,
@@ -202,7 +204,7 @@ extension AppModel {
                     state.session?.attemptIDs.append(existing.id)
                 }
                 if puzzle != nil, let sessionID, state.session?.id == sessionID { state.session?.activeRelatedRunID = existing.id }
-                else if puzzle != nil, returnGameID != nil || parentRunID != nil {
+                else if puzzle != nil, needsStandaloneRoute {
                     state.standalonePractice = ReviewStandalonePractice(runID: existing.id, parentRunID: parentRunID, returnGameID: returnGameID)
                 }
             }
@@ -231,7 +233,7 @@ extension AppModel {
             $0.runs.append(run); $0.record(run.attempt)
             if $0.session?.id == sessionID && $0.session?.targetIDs.contains(targetID) == true { $0.session?.attemptIDs.append(run.id) }
             if puzzle != nil, let sessionID, $0.session?.id == sessionID { $0.session?.activeRelatedRunID = run.id }
-            else if puzzle != nil, returnGameID != nil || parentRunID != nil {
+            else if puzzle != nil, needsStandaloneRoute {
                 $0.standalonePractice = ReviewStandalonePractice(runID: run.id, parentRunID: parentRunID, returnGameID: returnGameID)
             }
         }
@@ -284,6 +286,7 @@ extension AppModel {
                 state.runs[index].attempt.endedAt = Date()
                 let attempt = state.runs[index].attempt
                 state.record(attempt)
+                if state.standalonePractice?.runID == attempt.id { state.standalonePractice = nil }
             }
         }
     }

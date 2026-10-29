@@ -132,6 +132,9 @@ struct GameDetailView: View {
                         Button("Keep for practice", systemImage: "bookmark") { model.updateTarget(moment.id, action: .keep) }
                     }
                     Button("Review details", systemImage: "info.circle") { showingDetails = true }
+                    NavigationLink { NotationExportView(game: game) } label: {
+                        Label("Export game PGN", systemImage: "square.and.arrow.up")
+                    }.accessibilityIdentifier("review.export")
                     Button(model.isFavorite(game) ? "Remove from saved games" : "Save game", systemImage: "heart") { model.toggleFavorite(game) }
                 } label: { Image(systemName: "ellipsis.circle").frame(width: 44, height: 44) }
                     .accessibilityLabel("Review options").accessibilityIdentifier("review.options")

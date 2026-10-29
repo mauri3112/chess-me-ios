@@ -3,6 +3,8 @@ import ChessMeCore
 
 @main
 struct ChessMeApp: App {
+    @UIApplicationDelegateAdaptor(ChessMeAppDelegate.self) private var appDelegate
+    @StateObject private var notifications = GameNotifications.shared
     @StateObject private var model = AppModel()
     @Environment(\.scenePhase) private var scenePhase
 
@@ -23,6 +25,7 @@ struct ChessMeApp: App {
                 .environmentObject(model)
                 .environmentObject(model.authentication)
                 .environmentObject(model.subscriptions)
+                .environmentObject(notifications)
                 .tint(ChessMeStyle.green)
                 .preferredColorScheme(.light)
                 .task { await model.prepare() }

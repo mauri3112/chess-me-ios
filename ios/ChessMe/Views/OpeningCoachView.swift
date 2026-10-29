@@ -8,6 +8,9 @@ struct OpeningCoachView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 22) {
                 Text("Improve your openings").font(ChessMeStyle.title(30))
+                NavigationLink { PersonalOpeningExplorerView() } label: {
+                    Label("Explore your saved opening moves", systemImage: "arrow.triangle.branch")
+                }.accessibilityIdentifier("openings.explorer")
                 Text("Find the repeated early decision that costs you the most.").font(.subheadline).foregroundStyle(ChessMeStyle.muted)
                 if let report {
                     PaperCard {
